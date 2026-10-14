@@ -1,42 +1,52 @@
-# QBit Template: Extension
+# QBit Email
 
-Template repository for creating QQQ Extension QBits - infrastructure extensions, customizers, and action handlers.
+One email service for a QQQ system: an outbox with async sending, retries, dead letters and
+idempotency keys; providers as data rows (SMTP relay, Amazon SES, Postmark, SendGrid, Mailgun,
+Gmail); Markdown and MJML/HTML templates with versions and branding; delivery tracking from
+provider webhooks; a suppression list; RFC 8058 one-click unsubscribe; and PHI-safe sending.
+Inbound mail is phase 2.
 
-## What is an Extension QBit?
+Design: [`docs/DESIGN.md`](docs/DESIGN.md).
 
-Extension QBits extend or enhance how QQQ operates at the infrastructure/framework level. They provide:
-- New backend implementations
-- Authentication mechanisms
-- Audit capabilities
-- Table customizers
-- Action handlers
+## Requirements
 
-## Quick Start
+- Java 21
+- QQQ 4.1 (`qqq-bom-pom` 4.1.0-RC.4 or later)
+- An RDBMS backend for the `email_` tables
 
-Requires **Java 21**, **Maven 3.8+**, and QQQ **4.0.0**. Create your repository, customize its Maven coordinates and Java package/classes, implement the table customizer, then run `mvn clean verify`. See [Getting Started](docs/00-getting-started.md).
+## Install
 
-## Structure
-
+```xml
+<dependency>
+   <groupId>com.kingsrook.qbits</groupId>
+   <artifactId>qbit-email</artifactId>
+   <version>${qbit-email.version}</version>
+</dependency>
 ```
-src/main/java/com/kingsrook/qbits/example/
-├── ExampleExtensionQBitConfig.java    # Configuration
-├── ExampleExtensionQBitProducer.java  # Entry point
-└── customizers/
-    └── ExampleTableCustomizer.java    # Table customization
+
+```java
+new EmailQBitProducer()
+   .withQBitConfig(new EmailQBitConfig().withBackendName("rdbms"))
+   .produce(qInstance);
 ```
 
-## Key Characteristics
+## Tables, permissions and configuration
 
-- **No QAppSection** - Pure infrastructure
-- **No user-facing tables** (or minimal operational)
-- **Wraps existing tables/processes** with new behavior
-- **Validates dependencies** on other QQQ components
+See [`docs/DESIGN.md`](docs/DESIGN.md). Tables are prefixed `email_`; permissions use the full
+qbit name (`email.view`, `email.send`, `email.manage`, `email.admin`).
 
-## Documentation
+## Adopting in another app
 
-- [Getting Started](docs/00-getting-started.md)
-- [Extension Patterns](docs/01-extension-patterns.md)
+Add the dependency, produce the qbit against your RDBMS backend, add a provider row, and send
+through `EmailService` (or the `email_send_templated` process). Code that already calls core's
+`SendEmailAction` can route through the outbox with the messaging bridge (DESIGN section 2).
+
+## Build
+
+```bash
+./mvnw verify    # tests, Checkstyle and the JaCoCo gate
+```
 
 ## License
 
-See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

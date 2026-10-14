@@ -1,17 +1,47 @@
-# qbit-template-extension
+# CLAUDE.md
 
-GitHub template repository for scaffolding QQQ "Extension QBits" (infrastructure-level plugins: table customizers, auth, audit, action wrappers). Not a shipping library — consumers click "Use this template" and rename the `com.kingsrook.qbits.example` package.
+This file provides guidance to Claude Code when working with code in this repository.
 
-## QQQ 4.0 baseline — 2026-09-24
+## Project Overview
 
-The historical review below predates the 4.0 migration. This template targets Java 21 and the public QQQ 4.0.0 release from Maven Central. The corrected APIs, license references and actual template commands are in README.md and docs/00-getting-started.md. Preserve the documented multi-instance and scaffold limitations.
+**QBit Email**: one email service for a QQQ system (outbox, providers, templates with branding,
+delivery tracking, suppression, unsubscribe, PHI-safe sending; inbound in phase 2).
+Design: `docs/DESIGN.md`.
 
-## Knowledge base
+## Build Commands
 
-Reviewed dossiers for this repo and the wider QQQ platform live in the second-brain vault:
+```bash
+./mvnw compile          # always use the wrapper: Maven 3.10 cannot read the parent POM
+./mvnw test
+./mvnw verify           # tests + Checkstyle + JaCoCo gate (70% instructions, 90% classes)
+```
 
-- Hub / entry point: `R:/Git.Local/KofTwentyTwo/second-brain/knowledge/qqq/qqq-hub.md`
-- This repo's dossier: `R:/Git.Local/KofTwentyTwo/second-brain/knowledge/qqq/repos/qbit-template-extension.md`
-- QBit mechanics refresher: `R:/Git.Local/KofTwentyTwo/second-brain/knowledge/qqq/architecture/metadata-model.md`
+## Architecture
 
-Reviewed at commit `e7d4b4d672cc` (branch `main`, 2026-05-21). Known drift as of that review: no `qbit-build-parent` parent pom (org convention), qqq pinned at 0.35.0 on main (0.40.0-SNAPSHOT on develop), README still claims AGPL-3.0 while LICENSE/NOTICE are Apache-2.0, and README references `scripts/customize_template.py` / `actions/ExampleActionCustomizer.java` which do not exist. See the dossier's "Maturity & risks" and "v4.0 impact" sections before modifying the scaffold.
+- **Entry point:** `EmailQBitProducer implements QBitMetaDataProducer<EmailQBitConfig>`, package `com.kingsrook.qbits.email`.
+- Packages are added per phase as `docs/DESIGN.md` describes.
+
+## Invariants
+
+- Every send goes through the outbox (`email_message`); nothing sends inline.
+- Provider credentials are environment-variable NAMES; values are never stored, logged or returned.
+- PHI and PII never reach a body or a variable snapshot unless the template is `phiApproved`; snapshots follow the secured-data redaction and HMAC rules.
+
+## Naming (owner rule)
+
+- Tables are lowercase snake_case, prefixed `email_`; the backend name is the table name; columns are snake_case.
+- Permissions use the full qbit name: `email.view`, `email.send`, `email.manage`, `email.admin`.
+- Data lives in standard visible tables. Processes are table or record actions, never in the nav. The nav lists only the main tables.
+- UI endpoints are `/qqq/v1` spec extensions (`docs/UI-API-EXTENSIONS.md` in QRun-IO/qqq); provider webhooks are under `/qqq/hooks/email/...`.
+
+## Code Style
+
+3-space indent, braces on the next line, `return (x);`, flower-box Javadoc on every class and method, fluent `withX()` setters.
+
+## Release
+
+- CircleCI qqq-orb 0.6.8.
+- `develop` publishes SNAPSHOTs.
+- `release/*` publishes RCs (automated by `.github/workflows/release-rc.yml`).
+- `vX.Y.Z` tags publish releases (GA tags only).
+- Never push `hotfix/*` or `release/*` branches by hand; use `feature/` or `fix/`.
