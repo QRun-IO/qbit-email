@@ -197,6 +197,7 @@ public class EmailQBitProducer implements QBitMetaDataProducer<EmailQBitConfig>
       output.add(new EmailOutboxMessagingProviderMetaData().withName(qBitConfig.getBridgeProviderName()));
       output.addSelfToInstance(qInstance);
       registerWebhooks(qInstance);
+      com.kingsrook.qbits.email.outbox.EmailJobEffectTarget.register(qInstance);
       return (new MetaDataProducerMultiOutput());
    }
 
