@@ -108,7 +108,7 @@ class EmailHomePolishTest
          assertThat(tiles.get(i).child(0).attr("style")).contains("font-size:1.6rem");
          assertThat(tiles.get(i).child(0).attr("style").contains("#d64545")).isEqualTo(i == 2 || i == 3);
       }
-      assertThat(document.select("h3")).extracting(Element::text).containsExactly("Sends per hour, last 24 hours", "Provider health", "Recent messages", "Suppressions added, last 30 days");
+      assertThat(document.select("h3")).extracting(Element::text).containsExactly("Setup", "Sends per hour, last 24 hours", "Provider health", "Recent messages", "Suppressions added, last 30 days");
       assertThat(QContext.getQInstance().getApp("email").getWidgets()).containsExactly("emailHome");
    }
 
@@ -168,7 +168,7 @@ class EmailHomePolishTest
       assertThat(rows.first().text()).contains("When", "To", "Subject", "Status", "Waiting to retry");
       assertThat(html).contains("Secure message", "p***@", "Oct 14, 02:12 UTC", "Unhealthy", "&lt;broken&gt;", "min-width:0", "overflow-wrap:anywhere")
          .doesNotContain("private-canary", "Person &lt;", "RETRY_WAIT", "2026-10-14T");
-      assertThat(document.select("section").get(1).text()).contains("Last success Oct 14, 02:12 UTC", "Per-minute headroom 1");
+      assertThat(document.select("section").get(2).text()).contains("Last success Oct 14, 02:12 UTC", "Per-minute headroom 1");
       SystemWrites.updateOne(EmailTables.PROVIDER, new QRecord().withValue("id", 1).withValue("enabled", false).withValue("maxPerMinute", null));
       assertThat(EmailHome.overview().getHtml()).contains("Disabled", "No limit");
       QContext.getQSession().setPermissions(Set.of("email.view"));

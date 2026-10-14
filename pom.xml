@@ -147,6 +147,13 @@
          <version>2.0.3</version>
          <scope>test</scope>
       </dependency>
+      <!-- EmailDefaultsChangelogTest runs the shipped seed changelog through real Liquibase on H2. -->
+      <dependency>
+         <groupId>org.liquibase</groupId>
+         <artifactId>liquibase-core</artifactId>
+         <version>4.33.0</version>
+         <scope>test</scope>
+      </dependency>
       <dependency>
          <groupId>org.junit.jupiter</groupId>
          <artifactId>junit-jupiter</artifactId>
@@ -254,7 +261,7 @@
             <activeByDefault>true</activeByDefault>
          </activation>
          <properties>
-            <qqq.snapshot.version>4.1.0-RC.5</qqq.snapshot.version>
+            <qqq.snapshot.version>4.1.0-RC.7</qqq.snapshot.version>
          </properties>
          <dependencyManagement>
             <dependencies>
