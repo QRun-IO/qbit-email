@@ -28,6 +28,7 @@ import java.util.Map;
 import com.kingsrook.qbits.email.app.EmailApp;
 import com.kingsrook.qbits.email.bridge.EmailOutboxMessagingProviderMetaData;
 import com.kingsrook.qbits.email.delivery.EmailAlerts;
+import com.kingsrook.qbits.email.health.EmailHealthChecks;
 import com.kingsrook.qbits.email.metadata.EmailTableCustomizers;
 import com.kingsrook.qbits.email.metadata.EmailTables;
 import com.kingsrook.qbits.email.processes.EmailProcesses;
@@ -196,6 +197,7 @@ public class EmailQBitProducer implements QBitMetaDataProducer<EmailQBitConfig>
       output.add(EmailApp.app(qBitConfig, tables));
       output.add(new EmailOutboxMessagingProviderMetaData().withName(qBitConfig.getBridgeProviderName()));
       output.addSelfToInstance(qInstance);
+      EmailHealthChecks.register(qInstance);
       registerWebhooks(qInstance);
       return (new MetaDataProducerMultiOutput());
    }
