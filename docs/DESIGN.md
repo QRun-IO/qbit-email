@@ -20,7 +20,8 @@ unsubscribe and PHI rules.
 | D7 | Hard bounces and complaints suppress the address. One-click unsubscribe (RFC 8058) records a suppression for the message's category, and users see it as a Preferences section (core #1162). |
 | D8 | PHI-safe by default: PII/PHI-classified variables are refused unless the template is `phi_approved`. The recommended PHI pattern is a "secure message" (a sign-in link, no PHI in the body). |
 | D9 | Gmail: SMTP with an app password in phase (b), as a preset of the SMTP transport. The Gmail API with OAuth is specified (section 3.6) and built only on request. |
-| D10 | MJML is compiled when a version is activated, by a pluggable compiler (default: the `mjml` CLI when configured). Sends never need the compiler; HTML templates need nothing. |
+| D10 | MJML is compiled when a version is activated, by a pluggable compiler (default: the `mjml` CLI when configured, through stdin and stdout). Sends never need the compiler; HTML templates need nothing. |
+| D11 | Owner rule (2026-10-13): no files or filesystem, only the database and S3. Attachments, rendered bodies and (phase e) inbound mail live in the database or in object storage (qbit-object-storage), never on local disk; the services are stateless, so any replica can send, receive a webhook or render a preview. |
 
 ## 1. Flow
 
@@ -91,7 +92,7 @@ template may set `edit_permission_name` to restrict who edits it (e.g. marketing
   TRANSACTIONAL unless configured) and enqueues it. It throws on `REFUSED`, so callers still see
   failures; delivery is then asynchronous.
 - Attachments are stored through qbit-object-storage when it is installed, else refused with a
-  plain message (no blobs in the outbox).
+  plain message (no blobs in the outbox, nothing on local disk: D11).
 - Callers (qbit-alerts `EmailChannel` and `NotificationEmailer`, qbit-marketing
   `QqqMessagingEmailTransport`) can switch by configuration at once, then move to `EmailService`
   in phase (d) for templates, categories, idempotency and linked records.
@@ -304,9 +305,20 @@ schema.
 
 ### 7.3 Redaction and storage
 Following core `docs/SECURED-DATA.md` (section 15, QRun-IO/qqq#1161):
-- `variables_snapshot`: PII/PHI values become `hmac:v1:<keyId>:<b64url>` (HMAC-SHA256 with the
-  instance audit key `QQQ_AUDIT_HMAC_KEY`, over template␟variable␟message␟canonical value), or
-  `changed:v1` with no key; low-entropy values (booleans, small enums) are shredded (`shred:v1`).
+- `variables_snapshot`: PII/PHI values become tokens in the format of core
+  `ClassifiedValueTokens` (package `...core.actions.permissions.fieldaccess`, SECURED-DATA §14.5):
+  `hmac:v1:<keyId>:<b64url(HMAC-SHA256(key, m))>`, with `m` joined by `` and the canonical
+  value last, and the instance key from `QQQ_AUDIT_HMAC_KEY` (base64).
+  - **Record-bound variables** use the record binding, `m = table␟field␟pk␟canonical(value)`
+    (`forRecordField`), so the token matches the audit's and a field under a wipe rule gets
+    `shred:v1` with the same per-record-field key: a wipe also shreds the outbox snapshot.
+  - **Other values** use a domain-prefixed binding,
+    `m = "email"␟template␟variable␟messageId␟canonical(value)` (`forContext`), so they never
+    collide with a record binding. They get `hmac:v1` only; a low-entropy value (booleans, values
+    with under 4 distinct characters) gets `changed:v1`, because there is no record key to shred.
+  - No key configured: `changed:v1`.
+  - Until core ships the helper, the qbit carries `EmailValueTokens`, marked
+    `STAND-IN(core=#1161-impl, removeBy=RC.7)`, with the same names and output.
 - The subject and bodies of `phi_approved` messages are stored AES-256-GCM encrypted with a key
   from `QQQ_EMAIL_BODY_KEY` (no key: `phi_approved` sends are refused) and cleared after
   `bodyRetentionDays` once final.
@@ -344,11 +356,14 @@ MANUAL), source_message_id, source_event_id, note, created_date, expires_date (o
 ### 8.3 Preferences (core #1162)
 The qbit registers a Preferences section `email` ("Email") whose provider
 (`EmailPreferenceProvider implements UserPreferenceProviderInterface`) maps the signed-in user's
-address to `email_suppression` rows: one toggle per opt-out-able category (NOTIFICATION,
+address (`UserPreferenceRequestContext.getUserEmailAddress()`, never an address from the request)
+to `email_suppression` rows: one toggle per opt-out-able category (NOTIFICATION,
 MARKETING) and read-only rows saying that account and security mail is always sent. Qbits with
 finer settings keep their own sections: qbit-alerts' "Notifications" decides which alerts are
 emailed; this section decides whether NOTIFICATION mail reaches the address at all. It is built
-once #1162 is in an RC; one-click unsubscribe does not depend on it.
+once #1162 is in an RC; one-click unsubscribe does not depend on it. With no address on the
+account, the rows are read-only ("No email address on your account") and writes are refused. The
+section's description explains the split with qbit-alerts' Notifications section.
 
 ## 9. Integrations
 - **Alerts (core `QAlerts`, #1108):** called reflectively when present (section 4.2).
