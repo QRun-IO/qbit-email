@@ -157,7 +157,82 @@ and credential failures pause the provider. Tracking is explicitly controlled by
 `trackOpens` / `trackClicks`, off by default. The producer registers the phase-(c)
 receiver idempotently when the provided Javalin middleware is present.
 
-## Sending
+## Sending from another qbit
+
+There are two supported routes. Both queue through the durable outbox; a successful
+call acknowledges enqueueing, not delivery.
+
+**1. QQQ core only, for simple subject/body email.** The host installs qbit-email;
+the consuming qbit needs no qbit-email dependency or imports. Use
+`SendMessageAction` with `messagingProviderName` set to `qbitEmail` (the default
+bridge name; hosts can configure another name):
+
+```java
+import com.kingsrook.qqq.backend.core.actions.messaging.SendMessageAction;
+import com.kingsrook.qqq.backend.core.model.actions.messaging.Content;
+import com.kingsrook.qqq.backend.core.model.actions.messaging.Party;
+import com.kingsrook.qqq.backend.core.model.actions.messaging.SendMessageInput;
+import com.kingsrook.qqq.backend.core.model.actions.messaging.email.EmailContentRole;
+
+new SendMessageAction().execute(new SendMessageInput()
+   .withMessagingProviderName("qbitEmail")
+   .withTo(new Party().withAddress("pat@example.com"))
+   .withSubject("Ready")
+   .withContent(new Content().withContentRole(EmailContentRole.TEXT).withBody("Your export is ready.")));
+```
+
+**2. The published `com.kingsrook.qbits.email.api` package**, for templates,
+idempotency, categories, linked records, sender selection and delivery lookups.
+Consumers with a qbit-email dependency import only this package:
+
+```java
+import com.kingsrook.qbits.email.api.EmailApi;
+import com.kingsrook.qbits.email.api.EmailApiRequest;
+import com.kingsrook.qbits.email.api.EmailApiResult;
+
+EmailApiResult result = EmailApi.send(new EmailApiRequest()
+   .withTo("pat@example.com")
+   .withTemplateName("order_ready")
+   .withVariable("order_number", "A-1")
+   .withVariable("customer_name", "Pat")
+   .withIdempotencyKey("orders:42:ready")
+   .withLinkedRecord("orders", 42)
+   .withSender("orders", "ready"));
+```
+
+`EmailApi.ensureTemplate(EmailApiTemplate)` creates a template once; see
+[Templates from another qbit](#templates-from-another-qbit).
+`EmailApi.isInstalled(instance)` detects whether the qbit was produced.
+`defaultProviderName(instance)` resolves an enabled configured/default provider;
+`listSenderAddresses(providerName)` lists enabled sender rows (null selects the
+default). `readiness(instance, category)` reports configuration prerequisites,
+including MARKETING's public URL, unsubscribe key and default brand postal address.
+For a PHI-approved template, use `readiness(instance, category, true)` to also check
+the body key and provider PHI/tracking policy. PHI is a template approval state,
+not a category. Readiness is a preflight, not proof that a particular send will pass.
+
+`getMessage(id)` and `findMessagesByIdempotencyKeyPrefix(prefix, limit)` expose only
+id, delivery status, category, idempotency key, provider message id, template name,
+linked table/id and create/sent/delivered timestamps. They never return addresses,
+subjects, bodies or variable snapshots. Prefixes are literal and nonblank; limits
+must be positive; results are ordered by ascending message id. Missing messages
+return an empty Optional/list. Enqueue results have `QUEUED`, `DUPLICATE`,
+`SUPPRESSED` or `REFUSED`; delivery status is a separate string on `EmailApiMessage`.
+
+Database calls require the caller's initialized `QContext`; methods accepting an
+installed instance require it to be the current context instance. Lookups run as
+the email system, so callers must authorize any exposure to their own users.
+Sending retains the existing permission, schema, PHI, suppression and recipient
+rules. Database failures propagate as core `QException`; invalid template definitions
+and lookup arguments throw `IllegalArgumentException`. No secret values are exposed.
+
+The API uses only JDK, QQQ core and its own API types in published signatures.
+Changes within a `0.x` minor release line are additive only. Internal packages
+(including runtime, configuration, outbox, metadata, support and template classes)
+are not API and may change. The internal service details below describe host and
+qbit-email implementation behavior, not additional cross-qbit contracts.
+
+## Internal sending service
 
 ```java
 EmailSendResult result = EmailService.send(new EmailRequest()
@@ -271,14 +346,14 @@ preview never stores the result or changes the version.
 ### Templates from another qbit
 
 A qbit that sends its own mail ships the template with its code instead of asking an
-administrator to create it. Describe it with `EmailTemplateDefinition` and call
-`EmailTemplates.ensure` at startup or before first use:
+administrator to create it. Describe it with `EmailApiTemplate` and call
+`EmailApi.ensureTemplate` at startup or before first use:
 
 ```java
-boolean created = EmailTemplates.ensure(new EmailTemplateDefinition()
+boolean created = EmailApi.ensureTemplate(new EmailApiTemplate()
    .withName("order_ready")
    .withLabel("Order ready")
-   .withCategory(EmailCategory.TRANSACTIONAL)
+   .withCategory(EmailApiCategory.TRANSACTIONAL)
    .withSubject("Order {{order_number}} is ready")
    .withBody("Hi {{customer_name}}, order {{order_number}} is ready for pickup.")
    .withVariable("order_number", "Order number", "STRING", true, "PUBLIC")
@@ -290,7 +365,7 @@ boolean created = EmailTemplates.ensure(new EmailTemplateDefinition()
 
 `kind` defaults to MARKDOWN (MJML and HTML are also accepted), `withTextBody` is
 optional, and `withVariablesSchema(json)` replaces `withVariable` when you already have
-the JSON. When no template of that name exists, `ensure` validates the definition like
+the JSON. When no template of that name exists, `ensureTemplate` validates the definition like
 Activate Version (syntax, schema, a render with the samples, MJML compile), creates the
 template and an ACTIVE version 1 as the qbit, and returns true. When one exists it does
 nothing and returns false, so people's edits and later versions are never overwritten;
@@ -449,17 +524,10 @@ The bridge recursively maps Party/MultiParty TO, CC, BCC, FROM and REPLY_TO role
 TEXT/HTML alternatives. REFUSED throws `QException`; successful calls acknowledge
 queueing, not delivery. The built-in EMAIL and SES types are unchanged.
 
-For schema-aware core bridge calls, use the typed extension:
-
-```java
-new SendMessageAction().execute(new EmailTemplatedMessageInput()
-   .withEmailRequest(new EmailRequest().withTemplateName("email_secure_message")
-      .withTo("pat@example.com").withVariable("link", "https://app.example.com/inbox"))
-   .withMessagingProviderName("qbitEmail"));
-```
-
-Ordinary core `SendMessageInput` remains ad-hoc and cannot infer classifications
-from arbitrary pre-rendered text. Use the typed extension for classified variables.
+For schema-aware calls from another qbit, use `EmailApi.send` with an
+`EmailApiRequest` and declared template variables as described above. Ordinary
+core `SendMessageInput` is ad-hoc and cannot infer classifications from arbitrary
+pre-rendered text. The existing typed bridge extension is an internal interface.
 
 ## Configuration
 

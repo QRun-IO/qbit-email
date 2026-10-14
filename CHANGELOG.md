@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- Stable `com.kingsrook.qbits.email.api` contract for cross-qbit sends, create-once templates, metadata-only message lookups, enabled sender addresses, default provider selection and secret-safe readiness (including marketing and PHI prerequisites). JDK/QQQ-only signatures, complete request/status mapping tests and a reflection package-boundary guard; no new dependencies.
+- Documented both supported cross-qbit routes: core-only `SendMessageAction` via `qbitEmail`, and the public API for richer sends and lookups.
 - Provider sender addresses: child table `email_provider_sender_address` (validated lowercase address, display name, one default, enabled, note; unique per provider; domain bound to the provider's sending domain; admin-only), shown on the provider record. `EmailRequest.withFromAddressId`, `from_address_id` on messages, refusal of a from address that is not an enabled row of the resolved provider, and the provider `from_address` / `from_name` kept as the fallback.
 - Contingent possible-value filters on the new from-address pickers (send processes by `providerId`, Send Test Email by the acted-on provider, message `fromAddressId` by `providerId`) and on the attempt and event message pickers (by `providerId`) and the suppression source event (by `sourceMessageId`); the send processes also take `providerId`.
 - Phase (c): authenticated SNS, Postmark, SendGrid and Mailgun webhooks, durable inbox deduplication and Mailgun nonce replay protection; configurable Javalin routes.
