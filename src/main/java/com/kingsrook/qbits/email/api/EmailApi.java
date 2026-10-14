@@ -22,6 +22,7 @@ package com.kingsrook.qbits.email.api;
 
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -283,21 +284,24 @@ public final class EmailApi
    public static EmailApiReadiness readiness(QInstance instance, EmailApiCategory category, boolean phiApproved) throws QException
    {
       List<String> reasons = new ArrayList<>();
+      Set<EmailApiReadinessCheck> failed = EnumSet.noneOf(EmailApiReadinessCheck.class);
       var config = EmailRuntime.config(instance);
       if(config == null)
       {
-         return (new EmailApiReadiness(false, List.of("Email qbit is not installed")));
+         return (new EmailApiReadiness(false, List.of("Email qbit is not installed"), Set.of(EmailApiReadinessCheck.NOT_INSTALLED)));
       }
       QRecord provider = provider(instance, null);
       if(provider == null)
       {
          reasons.add("An enabled named or default provider is required");
+         failed.add(EmailApiReadinessCheck.PROVIDER_MISSING);
       }
       else
       {
          if(!EmailTableCustomizers.validateProvider(provider, config).isEmpty())
          {
             reasons.add("The default provider configuration is invalid");
+            failed.add(EmailApiReadinessCheck.PROVIDER_INVALID);
          }
          if(phiApproved)
          {
@@ -308,6 +312,7 @@ public final class EmailApi
             catch(IllegalArgumentException e)
             {
                reasons.add("PHI email needs a PHI-enabled provider with open and click tracking disabled");
+               failed.add(EmailApiReadinessCheck.PHI_PROVIDER);
             }
          }
       }
@@ -324,22 +329,26 @@ public final class EmailApi
          catch(IllegalArgumentException e)
          {
             reasons.add("MARKETING email needs a valid publicBaseUrl");
+            failed.add(EmailApiReadinessCheck.PUBLIC_BASE_URL);
          }
          if(!hasSecret(config.getSecretResolver(), "QQQ_EMAIL_UNSUBSCRIBE_KEY"))
          {
             reasons.add("MARKETING email needs QQQ_EMAIL_UNSUBSCRIBE_KEY");
+            failed.add(EmailApiReadinessCheck.UNSUBSCRIBE_KEY);
          }
          List<QRecord> brands = read(EmailTables.BRAND, EmailStore.equal("isDefault", true).withLimit(2), Set.of("id", "postalAddress"));
          if(brands.size() != 1 || brands.getFirst().getValueString("postalAddress") == null || brands.getFirst().getValueString("postalAddress").isBlank())
          {
             reasons.add("MARKETING email needs a default brand with a postal address");
+            failed.add(EmailApiReadinessCheck.BRAND_POSTAL_ADDRESS);
          }
       }
       if(phiApproved && !hasSecret(config.getSecretResolver(), "QQQ_EMAIL_BODY_KEY"))
       {
          reasons.add("PHI email needs QQQ_EMAIL_BODY_KEY");
+         failed.add(EmailApiReadinessCheck.BODY_KEY);
       }
-      return (new EmailApiReadiness(reasons.isEmpty(), reasons));
+      return (new EmailApiReadiness(reasons.isEmpty(), reasons, failed));
    }
 
 
