@@ -90,6 +90,10 @@ public final class EmailBrands
          if(value != null && !value.isBlank())
          {
             VariableSchema.url(value);
+            if(!"siteUrl".equals(field))
+            {
+               https(value);
+            }
          }
       }
       social(brand);
@@ -109,12 +113,44 @@ public final class EmailBrands
          }
          var links = new com.fasterxml.jackson.databind.ObjectMapper().readValue(json,
             new com.fasterxml.jackson.core.type.TypeReference<List<java.util.Map<String, String>>>() {});
-         links.forEach(link -> VariableSchema.url(link.get("url")));
+         links.forEach(link -> https(link.get("url")));
          return (links);
       }
       catch(Exception e)
       {
-         throw (new IllegalArgumentException("Social links need labels and http/https URLs"));
+         throw (new IllegalArgumentException("Social links need labels and https URLs"));
       }
    }
+
+   /*******************************************************************************
+    ** Logos and social destinations require HTTPS at the save boundary.
+    *******************************************************************************/
+   private static void https(String value)
+   {
+      VariableSchema.url(value);
+      if(!"https".equalsIgnoreCase(java.net.URI.create(value).getScheme()))
+      {
+         throw (new IllegalArgumentException("Brand logo and social URLs must use https"));
+      }
+   }
+
+   /*******************************************************************************
+    ** Approved messages restrict every image to the brand site or an explicit host.
+    *******************************************************************************/
+   public static boolean allowedImage(String value, QRecord brand)
+   {
+      try
+      {
+         https(value);
+         String host = java.net.URI.create(value).getHost();
+         String site = brand.getValueString("siteUrl");
+         return (EmailRuntime.config().getAllowedImageHosts().contains(host.toLowerCase(java.util.Locale.ROOT))
+            || site != null && host.equalsIgnoreCase(java.net.URI.create(site).getHost()));
+      }
+      catch(IllegalArgumentException e)
+      {
+         return (false);
+      }
+   }
+
 }

@@ -151,7 +151,7 @@ public final class EmailService
          else if(retained != null && Boolean.TRUE.equals(retained.getValueBoolean("phiApproved")))
          {
             EmailTemplateRenderer.checkProvider(provider);
-            com.kingsrook.qbits.email.phi.EmailBodyEncryption.encrypt(null);
+            com.kingsrook.qbits.email.phi.EmailBodyEncryption.encrypt(null, "subject", "pending");
          }
       }
       catch(IllegalArgumentException e)
@@ -317,6 +317,7 @@ public final class EmailService
       {
          content.setValue(field, row.getValue(field));
       }
+      content.withValue("encryptionSourceId", row.getValueString("id"));
       return (send(request, ignored -> new EmailRenderer.Rendered(row.getValueString("htmlBody"), row.getValueString("textBody")), content));
    }
 
@@ -395,6 +396,14 @@ public final class EmailService
          else
          {
             content = new QRecord();
+            if(Boolean.TRUE.equals(row.getValueBoolean("phiApproved")))
+            {
+               for(String field : List.of("subject", "htmlBody", "textBody"))
+               {
+                  content.setValue(field, com.kingsrook.qbits.email.phi.EmailBodyEncryption.rebind(row.getValueString(field), field,
+                     row.getValueString("encryptionSourceId"), inserted.getValueString("id")));
+               }
+            }
             if(unsubscribe != null && row.getValueString("unsubscribeUrl") == null)
             {
                String link = "<p><a href=\"" + com.kingsrook.qbits.email.template.EmailTemplateEngine.escape(unsubscribe) + "\">Unsubscribe</a></p>";
@@ -417,7 +426,7 @@ public final class EmailService
          return (refused(e.getMessage()));
       }
       return (new EmailSendResult(inserted.getValueInteger("id"), "SUPPRESSED".equals(row.getValueString("status"))
-         ? EmailSendResult.Status.SUPPRESSED : EmailSendResult.Status.QUEUED, List.of()));
+         ? EmailSendResult.Status.SUPPRESSED : EmailSendResult.Status.QUEUED, templateRenderer == null ? List.of() : templateRenderer.warnings()));
    }
 
    /*******************************************************************************

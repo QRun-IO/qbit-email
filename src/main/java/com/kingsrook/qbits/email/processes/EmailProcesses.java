@@ -82,6 +82,7 @@ public final class EmailProcesses
    public static final String CANCEL = "email_cancel";
    public static final String SEND_NOW = "email_send_now";
    public static final String SEND_TEST = "email_send_test";
+   public static final String SEND_AD_HOC = "email_send_ad_hoc";
    public static final String SEND_TEMPLATED = "email_send_templated";
    public static final String DISPATCH = "email_dispatch";
    public static final String MAINTAIN = "email_maintain";
@@ -102,7 +103,7 @@ public final class EmailProcesses
       return (switch(name)
       {
          case RESEND, CANCEL, SEND_NOW, NEW_VERSION, ACTIVATE_VERSION -> EmailPermissions.MANAGE;
-         case SEND_TEMPLATED -> EmailPermissions.SEND;
+         case SEND_TEMPLATED, SEND_AD_HOC -> EmailPermissions.SEND;
          default -> EmailPermissions.ADMIN;
       });
    }
@@ -117,16 +118,22 @@ public final class EmailProcesses
          .withComponent(new QFrontendComponentMetaData().withType(QComponentType.EDIT_FORM))
          .withFormField(new QFieldMetaData("toAddress", QFieldType.STRING).withLabel("To address").withIsRequired(true)));
       QFunctionInputMetaData inputs = new QFunctionInputMetaData();
+      QFunctionInputMetaData adHocInputs = new QFunctionInputMetaData();
       for(String field : List.of("templateName", "to", "cc", "bcc", "replyTo", "subject", "markdownBody", "htmlBody", "textBody", "providerName", "brandName",
-         "category", "locale", "variablesJson", "recordVariablesJson", "linkedTableName", "linkedRecordId", "idempotencyKey"))
+         "locale", "variablesJson", "recordVariablesJson", "linkedTableName", "linkedRecordId", "idempotencyKey"))
       {
          inputs.withField(new QFieldMetaData(field, QFieldType.STRING));
+         adHocInputs.withField(new QFieldMetaData(field, QFieldType.STRING));
       }
+      adHocInputs.withField(new QFieldMetaData("category", QFieldType.STRING));
+      QProcessMetaData adHoc = new QProcessMetaData().withName(SEND_AD_HOC).withLabel("Send Ad Hoc Email").withIsHidden(true)
+         .withPermissionRules(EmailTables.permissionRules())
+         .withStep(new QBackendStepMetaData().withName("send").withCode(new QCodeReference(SendStep.class)).withInputData(adHocInputs));
       QProcessMetaData send = new QProcessMetaData().withName(SEND_TEMPLATED).withLabel("Send Email").withIsHidden(true)
          .withPermissionRules(EmailTables.permissionRules())
          .withStep(new QBackendStepMetaData().withName("send").withCode(new QCodeReference(SendStep.class)).withInputData(inputs));
       return (List.of(action(RESEND, "Resend", EmailTables.MESSAGE), action(CANCEL, "Cancel", EmailTables.MESSAGE),
-         action(SEND_NOW, "Send Now", EmailTables.MESSAGE), test, send,
+         action(SEND_NOW, "Send Now", EmailTables.MESSAGE), test, send, adHoc,
          action(NEW_VERSION, "New Version", EmailTables.TEMPLATE), action(ACTIVATE_VERSION, "Activate Version", EmailTables.VERSION),
          action(APPROVE_PHI, "Approve For PHI", EmailTables.VERSION),
          scheduled(config, DISPATCH, "Dispatch Email", config.getDispatchIntervalSeconds()),
@@ -393,7 +400,7 @@ public final class EmailProcesses
                request.withRecordVariable(binding.getKey(), table, id);
             }
          }
-         if(input.getValueString("category") != null)
+         if(request.getTemplateName() == null && input.getValueString("category") != null)
          {
             try
             {

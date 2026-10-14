@@ -52,7 +52,7 @@ public final class EmailMarkdown
       String html = HtmlRenderer.builder().escapeHtml(true).sanitizeUrls(true).extensions(extensions).build()
          .render(Parser.builder().extensions(extensions).build().parse(markdown == null ? "" : markdown))
          .replace("<a ", "<a style=\"color:inherit;text-decoration:underline\" ");
-      Matcher links = Pattern.compile("<a[^>]* href=\"([^\"]*)\"[^>]*>(.*?)</a>\\{\\.button}", Pattern.DOTALL).matcher(html);
+      Matcher links = Pattern.compile("<a[^>]* href=\"([^\"]*)\"[^>]*>((?:(?!</?a\\b)[^\\r\\n])*)</a>\\{\\.button}").matcher(html);
       StringBuilder result = new StringBuilder();
       while(links.find())
       {

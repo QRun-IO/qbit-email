@@ -67,7 +67,7 @@ public class EmailDispatcher
     *******************************************************************************/
    public EmailDispatcher()
    {
-      this(new EmailTransportRegistry());
+      this(EmailRuntime.config() == null ? new EmailTransportRegistry() : EmailRuntime.config().newTransportRegistry());
    }
 
    /*******************************************************************************
@@ -474,7 +474,7 @@ public class EmailDispatcher
       {
          throw (new IllegalArgumentException("Protected email content must be encrypted"));
       }
-      return (com.kingsrook.qbits.email.phi.EmailBodyEncryption.decrypt(value));
+      return (com.kingsrook.qbits.email.phi.EmailBodyEncryption.decrypt(value, field, message.getValueString("id")));
    }
 
    /*******************************************************************************

@@ -65,6 +65,7 @@ public final class EmailTemplateRenderer
    private final Map<String, EmailRequest.RecordVariable> records;
    private final EmailCategory category;
    private final boolean approved;
+   private final List<String> warnings = new ArrayList<>();
 
    /*******************************************************************************
     ** Resolve a template's active locale, falling back only to English.
@@ -99,30 +100,62 @@ public final class EmailTemplateRenderer
    {
       this.template = template;
       this.version = version;
-      brand = EmailBrands.resolve(request.getBrandName(), template);
+      approved = Boolean.TRUE.equals(template.getValueBoolean("phiApproved")) && version.getValue("id") != null
+         && Objects.equals(template.getValue("approvedVersionId"), version.getValue("id"));
+      brand = EmailBrands.resolve(approved ? null : request.getBrandName(), template);
+      if(approved)
+      {
+         for(String field : List.of("logoUrl", "logoDarkUrl"))
+         {
+            if(brand.getValueString(field) != null && !EmailBrands.allowedImage(brand.getValueString(field), brand))
+            {
+               brand.setValue(field, null);
+               warnings.add("Brand logo omitted: image host is not allowed");
+            }
+         }
+      }
       EmailBrands.validate(brand);
       schema = new VariableSchema(version.getValueString("variablesSchema"));
       records = new LinkedHashMap<>(request.getRecordVariables());
+      java.util.Set<String> references = new java.util.LinkedHashSet<>();
+      for(String field : List.of("subject", "preheader", "bodySource", "textSource", "compiledHtml"))
+      {
+         references.addAll(new EmailTemplateEngine().parse(version.getValueString(field), schema).references());
+      }
+      if(!"MARKDOWN".equals(template.getValueString("kind")))
+      {
+         EmailTemplateEngine.validateHtml(version.getValueString("bodySource"));
+         EmailTemplateEngine.validateHtml(version.getValueString("compiledHtml"));
+      }
       Map<String, Serializable> supplied = new LinkedHashMap<>(request.getVariables());
       for(var binding : records.entrySet())
       {
+         supplied.keySet().removeIf(key -> key.startsWith(binding.getKey() + "."));
          QTableMetaData table = QContext.getQInstance().getTable(binding.getValue().table());
          if(table == null)
          {
             throw (new IllegalArgumentException("Record variable table is unavailable"));
          }
+         java.util.Set<String> fields = references.stream().filter(path -> path.startsWith(binding.getKey() + "."))
+            .map(path -> path.substring(binding.getKey().length() + 1).split("\\.")[0]).collect(java.util.stream.Collectors.toSet());
+         if(fields.isEmpty())
+         {
+            supplied.put(binding.getKey(), new LinkedHashMap<>());
+            continue;
+         }
          // Never use SystemWrites here: masking and record locks belong to the sender.
-         List<QRecord> rows = new QueryAction().execute(new QueryInput(table.getName()).withShouldFetchHeavyFields(true)
+         List<QRecord> rows = new QueryAction().execute(new QueryInput(table.getName()).withShouldFetchHeavyFields(true).withFieldNamesToInclude(fields)
             .withFilter(EmailStore.equal(table.getPrimaryKeyField(), binding.getValue().id()).withLimit(1))).getRecords();
          if(rows.isEmpty())
          {
             throw (new IllegalArgumentException("Record variable is unavailable to the sender"));
          }
-         Map<String, Serializable> visible = new LinkedHashMap<>(rows.getFirst().getValues());
+         Map<String, Serializable> visible = new LinkedHashMap<>();
+         fields.forEach(field -> visible.put(field, rows.getFirst().getValue(field)));
          for(var field : table.getFields().values())
          {
             var lock = field.getFieldSecurityLock();
-            if(lock != null)
+            if(lock != null && fields.contains(field.getName()))
             {
                var session = QContext.getQSession();
                List<Serializable> keys = session == null ? List.of() : session.getSecurityKeyValues(lock.getSecurityKeyType());
@@ -144,9 +177,11 @@ public final class EmailTemplateRenderer
          }
       }
       values = schema.validate(supplied);
-      category = request.getCategory() != null ? request.getCategory() : EmailCategory.valueOf(Objects.requireNonNullElse(template.getValueString("category"), "TRANSACTIONAL"));
-      approved = Boolean.TRUE.equals(template.getValueBoolean("phiApproved")) && version.getValue("id") != null
-         && Objects.equals(template.getValue("approvedVersionId"), version.getValue("id"));
+      category = EmailCategory.valueOf(Objects.requireNonNullElse(template.getValueString("category"), "TRANSACTIONAL"));
+      if(request.getCategory() != null && request.getCategory() != category)
+      {
+         throw (new IllegalArgumentException("Template category cannot be overridden"));
+      }
       if(approved && category == EmailCategory.MARKETING)
       {
          throw (new IllegalArgumentException("PHI-approved templates cannot send MARKETING email"));
@@ -261,7 +296,8 @@ public final class EmailTemplateRenderer
       context.put("now", EmailRuntime.clock().instant().toString());
       context.put("unsubscribe_url", category == EmailCategory.NOTIFICATION || category == EmailCategory.MARKETING ? unsubscribe : "");
       EmailTemplateEngine engine = new EmailTemplateEngine();
-      String subject = engine.parse(version.getValueString("subject"), schema).render(context, EmailTemplateEngine.Context.TEXT);
+      EmailTemplateEngine.Budget budget = new EmailTemplateEngine.Budget();
+      String subject = engine.parse(version.getValueString("subject"), schema).render(context, EmailTemplateEngine.Context.TEXT, budget, warnings);
       if(subject.contains("\r") || subject.contains("\n"))
       {
          throw (new IllegalArgumentException("Subject must be one line"));
@@ -272,15 +308,24 @@ public final class EmailTemplateRenderer
       {
          throw (new IllegalArgumentException("MJML version must be compiled before sending"));
       }
-      String body = engine.parse(source, schema).render(context, "MARKDOWN".equals(kind) ? EmailTemplateEngine.Context.MARKDOWN : EmailTemplateEngine.Context.HTML);
-      String preheader = engine.parse(version.getValueString("preheader"), schema).render(context, EmailTemplateEngine.Context.TEXT);
+      String body = engine.parse(source, schema).render(context, "MARKDOWN".equals(kind) ? EmailTemplateEngine.Context.MARKDOWN : EmailTemplateEngine.Context.HTML, budget, warnings);
+      String preheader = engine.parse(version.getValueString("preheader"), schema).render(context, EmailTemplateEngine.Context.TEXT, budget, warnings);
       String html = "MARKDOWN".equals(kind) ? EmailLayout.render(EmailMarkdown.render(body, brand), preheader, brand, category, unsubscribe)
          : EmailLayout.appendFooter(body, brand, category, unsubscribe);
+      if(approved)
+      {
+         html = restrictImages(html);
+      }
       String text = version.getValueString("textSource") == null ? HtmlToText.convert(html)
-         : engine.parse(version.getValueString("textSource"), schema).render(context, EmailTemplateEngine.Context.TEXT);
-      return (new QRecord().withValue("subject", approved && encrypt ? EmailBodyEncryption.encrypt(subject) : subject)
-         .withValue("htmlBody", approved && encrypt ? EmailBodyEncryption.encrypt(html) : html)
-         .withValue("textBody", approved && encrypt ? EmailBodyEncryption.encrypt(text) : text)
+         : engine.parse(version.getValueString("textSource"), schema).render(context, EmailTemplateEngine.Context.TEXT, budget, warnings);
+      if((long) subject.getBytes(java.nio.charset.StandardCharsets.UTF_8).length + html.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+         + text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 1_048_576)
+      {
+         throw (new IllegalArgumentException("Template output is too large"));
+      }
+      return (new QRecord().withValue("subject", approved && encrypt ? EmailBodyEncryption.encrypt(subject, "subject", messageId) : subject)
+         .withValue("htmlBody", approved && encrypt ? EmailBodyEncryption.encrypt(html, "htmlBody", messageId) : html)
+         .withValue("textBody", approved && encrypt ? EmailBodyEncryption.encrypt(text, "textBody", messageId) : text)
          .withValue("variablesSnapshot", VariableSchema.json(snapshot(values, "", messageId)))
          .withValue("templateId", template.getValue("id")).withValue("templateVersionId", version.getValue("id"))
          .withValue("brandId", brand.getValue("id")).withValue("locale", version.getValue("locale"))
@@ -292,7 +337,7 @@ public final class EmailTemplateRenderer
     *******************************************************************************/
    private Object snapshot(Object value, String path, String messageId)
    {
-      if(!path.isEmpty() && EmailClassifications.sensitive(classification(path)))
+      if(!path.isEmpty() && (EmailClassifications.sensitive(classification(path)) || unclassifiedRecordField(path)))
       {
          for(var record : records.entrySet())
          {
@@ -322,4 +367,87 @@ public final class EmailTemplateRenderer
       }
       return (value == null || value instanceof Number || value instanceof Boolean ? value : value.toString());
    }
+
+   /*******************************************************************************
+    ** Missing record classification fails closed only in the retained snapshot.
+    *******************************************************************************/
+   private boolean unclassifiedRecordField(String path)
+   {
+      for(var record : records.entrySet())
+      {
+         if(path.startsWith(record.getKey() + "."))
+         {
+            String field = path.substring(record.getKey().length() + 1).split("\\.")[0];
+            return (!EmailClassifications.hasSource(QContext.getQInstance().getTable(record.getValue().table()), field, EmailRuntime.config()));
+         }
+      }
+      return (false);
+   }
+
+   /*******************************************************************************
+    ** Warnings contain binding names and policy reasons, never input values.
+    *******************************************************************************/
+   public List<String> warnings()
+   {
+      return (List.copyOf(new java.util.LinkedHashSet<>(warnings)));
+   }
+
+   /*******************************************************************************
+    ** Apply the image policy after Markdown, layout and brand footer expansion.
+    *******************************************************************************/
+   private String restrictImages(String html)
+   {
+      var document = org.jsoup.Jsoup.parse(html);
+      document.outputSettings().prettyPrint(false);
+      document.select("[src],[background],[srcset],image").forEach(element ->
+      {
+         element.removeAttr("srcset");
+         if(element.hasAttr("src") && !EmailBrands.allowedImage(element.attr("src"), brand))
+         {
+            element.remove();
+            warnings.add("Image omitted: image host is not allowed");
+         }
+         if(element.hasAttr("background") && !EmailBrands.allowedImage(element.attr("background"), brand))
+         {
+            element.removeAttr("background");
+            warnings.add("Image omitted: image host is not allowed");
+         }
+         if("image".equals(element.normalName()))
+         {
+            element.remove();
+            warnings.add("SVG image omitted from approved email");
+         }
+      });
+      org.jsoup.select.NodeTraversor.filter((node, depth) ->
+      {
+         if(node instanceof org.jsoup.nodes.Comment comment && comment.getData().toLowerCase(java.util.Locale.ROOT).contains("[if"))
+         {
+            warnings.add("Conditional markup omitted from approved email");
+            return (org.jsoup.select.NodeFilter.FilterResult.REMOVE);
+         }
+         return (org.jsoup.select.NodeFilter.FilterResult.CONTINUE);
+      }, document);
+      // CSS image expressions can use escapes and image-set, so approved content
+      // uses img elements instead of CSS images. Layout colors remain intact.
+      document.select("[style]").forEach(element ->
+      {
+         String style = element.attr("style");
+         if(style.toLowerCase(java.util.Locale.ROOT).contains("url") || style.contains("\\") || style.toLowerCase(java.util.Locale.ROOT).contains("image-set"))
+         {
+            element.removeAttr("style");
+            warnings.add("CSS image omitted from approved email");
+         }
+      });
+      document.select("style").forEach(element ->
+      {
+         String style = element.data();
+         if(style.toLowerCase(java.util.Locale.ROOT).contains("url") || style.contains("\\") || style.toLowerCase(java.util.Locale.ROOT).contains("@import") || style.toLowerCase(java.util.Locale.ROOT).contains("image-set"))
+         {
+            element.remove();
+            warnings.add("CSS image omitted from approved email");
+         }
+      });
+      return (document.outerHtml());
+   }
+
 }

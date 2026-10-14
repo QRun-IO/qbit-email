@@ -154,7 +154,20 @@ public class VariableSchema
     *******************************************************************************/
    public static String url(String value)
    {
+      return (url(value, false));
+   }
+
+   /*******************************************************************************
+    ** The same URL policy, optionally allowing mailto only for link destinations.
+    *******************************************************************************/
+   public static String url(String value, boolean allowMailto)
+   {
       URI uri = URI.create(value);
+      if(allowMailto && "mailto".equalsIgnoreCase(uri.getScheme()) && !uri.getRawSchemeSpecificPart().isBlank()
+         && !value.matches("(?is).*%(?:0a|0d).*"))
+      {
+         return (value);
+      }
       if(uri.getScheme() == null || !List.of("http", "https").contains(uri.getScheme().toLowerCase(java.util.Locale.ROOT)) || uri.getHost() == null || uri.getUserInfo() != null)
       {
          throw (new IllegalArgumentException("URL must use http or https"));

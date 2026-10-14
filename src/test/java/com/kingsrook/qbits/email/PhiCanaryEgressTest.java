@@ -209,7 +209,7 @@ class PhiCanaryEgressTest
             for(String field : List.of("subject", "htmlBody", "textBody"))
             {
                assertThat(raw.getValueString(field)).startsWith("enc:v1:").doesNotContain(canary);
-               assertThat(EmailBodyEncryption.decrypt(raw.getValueString(field))).contains(canary);
+               assertThat(EmailBodyEncryption.decrypt(raw.getValueString(field), field, raw.getValueString("id"))).contains(canary);
             }
             assertThat(raw.getValueString("variablesSnapshot")).contains("hmac:v1:");
             for(var value : raw.getValues().entrySet())
@@ -275,7 +275,7 @@ class PhiCanaryEgressTest
       assertThat(EmailService.send(request()).status()).isEqualTo(EmailSendResult.Status.REFUSED);
       SystemWrites.updateOne(EmailTables.PROVIDER, new QRecord().withValue("id", 1).withValue("trackOpens", false).withValue("phiAllowed", false));
       assertThat(EmailService.send(request()).status()).isEqualTo(EmailSendResult.Status.REFUSED);
-      assertThat(EmailService.send(request().withCategory(com.kingsrook.qbits.email.outbox.EmailCategory.MARKETING)).reasons().toString()).contains("MARKETING");
+      assertThat(EmailService.send(request().withCategory(com.kingsrook.qbits.email.outbox.EmailCategory.MARKETING)).reasons().toString()).contains("Template category cannot be overridden");
       assertThat(H2Support.all(EmailTables.MESSAGE)).isEmpty();
    }
 
@@ -293,7 +293,7 @@ class PhiCanaryEgressTest
       var result = EmailService.send(request());
       assertThat(result.status()).isEqualTo(EmailSendResult.Status.QUEUED);
       var row = EmailStore.get(EmailTables.MESSAGE, result.messageId(), null);
-      assertThat(EmailBodyEncryption.decrypt(row.getValueString("subject"))).isEqualTo("************");
+      assertThat(EmailBodyEncryption.decrypt(row.getValueString("subject"), "subject", row.getValueString("id"))).isEqualTo("************");
       SystemWrites.updateOne(EmailTables.PROVIDER, new QRecord().withValue("id", 1).withValue("trackClicks", true));
       var dispatcher = new EmailDispatcher(new com.kingsrook.qbits.email.transport.EmailTransportRegistry().withTransport("SMTP", (envelope, settings) ->
       {
@@ -306,7 +306,9 @@ class PhiCanaryEgressTest
       assertThat(resent.status()).isEqualTo(EmailSendResult.Status.QUEUED);
       QRecord copy = EmailStore.get(EmailTables.MESSAGE, resent.messageId(), null);
       assertThat(copy.getValueBoolean("phiApproved")).isTrue();
-      assertThat(copy.getValueString("subject")).isEqualTo(row.getValueString("subject"));
+      assertThat(copy.getValueString("subject")).isNotEqualTo(row.getValueString("subject"));
+      assertThat(EmailBodyEncryption.decrypt(copy.getValueString("subject"), "subject", copy.getValueString("id"))).isEqualTo("************");
+      assertThatThrownBy(() -> EmailBodyEncryption.decrypt(copy.getValueString("subject"), "subject", row.getValueString("id"))).hasMessageContaining("could not be opened");
       assertThat(copy.getValue("templateVersionId")).isEqualTo(row.getValue("templateVersionId"));
    }
 
@@ -316,7 +318,7 @@ class PhiCanaryEgressTest
    @Test
    void ciphertextPrefixIsNotAuthority() throws Exception
    {
-      String encrypted = EmailBodyEncryption.encrypt(canary);
+      String encrypted = EmailBodyEncryption.encrypt(canary, "subject", "test");
       var result = EmailService.send(new EmailRequest().withTo("p@example.com").withSubject(encrypted).withTextBody(encrypted));
       assertThat(result.status()).isEqualTo(EmailSendResult.Status.QUEUED);
       var dispatcher = new EmailDispatcher(new com.kingsrook.qbits.email.transport.EmailTransportRegistry().withTransport("SMTP", (envelope, settings) ->
@@ -349,12 +351,35 @@ class PhiCanaryEgressTest
       assertThat(EmailValueTokens.verifyRecordField(record, patient, patient.getField("name"), 2, canary)).isFalse();
       assertThat(EmailValueTokens.canonical(new BigDecimal("1.2000"))).isEqualTo("1.2");
       assertThat(EmailValueTokens.canonical(Instant.parse("2026-10-13T12:00:00Z"))).isEqualTo("2026-10-13T12:00:00Z");
-      String encrypted = EmailBodyEncryption.encrypt(canary);
-      assertThat(EmailBodyEncryption.encrypt(canary)).isNotEqualTo(encrypted);
-      assertThat(EmailBodyEncryption.decrypt(encrypted)).isEqualTo(canary);
-      assertThatThrownBy(() -> EmailBodyEncryption.decrypt(encrypted.substring(0, encrypted.length() - 4) + "AAAA")).hasMessageContaining("could not be opened");
+      String encrypted = EmailBodyEncryption.encrypt(canary, "subject", "test");
+      assertThat(EmailBodyEncryption.encrypt(canary, "subject", "test")).isNotEqualTo(encrypted);
+      assertThat(EmailBodyEncryption.decrypt(encrypted, "subject", "test")).isEqualTo(canary);
+      assertThatThrownBy(() -> EmailBodyEncryption.decrypt(encrypted.substring(0, encrypted.length() - 4) + "AAAA", "subject", "test")).hasMessageContaining("could not be opened");
       EmailRuntime.config().withSecretResolver(name -> null);
       assertThat(EmailValueTokens.forContext(binding, canary)).isEqualTo("changed:v1");
-      assertThatThrownBy(() -> EmailBodyEncryption.encrypt(canary)).hasMessageContaining("QQQ_EMAIL_BODY_KEY");
+      assertThatThrownBy(() -> EmailBodyEncryption.encrypt(canary, "subject", "test")).hasMessageContaining("QQQ_EMAIL_BODY_KEY");
    }
+
+   /*******************************************************************************
+    ** Record projection follows parsed references and snapshots fail closed.
+    *******************************************************************************/
+   @Test
+   void referencedFieldsOnlyAndUnclassifiedTokens() throws Exception
+   {
+      EmailRuntime.config().withClassificationOverrides(Map.of());
+      patient.withField(new QFieldMetaData("unused", QFieldType.STRING).withBackendName("unused"));
+      try(Connection connection = new ConnectionManager().getConnection((RDBMSBackendMetaData) QContext.getQInstance().getBackend("rdbms")))
+      {
+         connection.createStatement().execute("ALTER TABLE test_patient ADD unused VARCHAR(200) DEFAULT 'never-load-this'");
+      }
+      SystemWrites.updateOne(EmailTables.VERSION, new QRecord().withValue("id", version.getValue("id"))
+         .withValue("subject", "Notice").withValue("bodySource", "{{#if patient.name}}Hello {{patient.name}}{{/if}}"));
+      EmailVersions.activate(version.getValueInteger("id"));
+      var result = EmailService.send(request());
+      assertThat(result.status()).isEqualTo(EmailSendResult.Status.QUEUED);
+      QRecord row = EmailStore.get(EmailTables.MESSAGE, result.messageId(), null);
+      assertThat(row.getValueString("htmlBody")).contains(canary);
+      assertThat(row.getValueString("variablesSnapshot")).contains("name", "hmac:v1:").doesNotContain(canary, "unused", "never-load-this", "\"id\"");
+   }
+
 }

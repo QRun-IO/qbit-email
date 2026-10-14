@@ -60,7 +60,7 @@ public final class EmailBodyEncryption
    /*******************************************************************************
     ** Encrypt with a fresh 96-bit nonce and 128-bit authentication tag.
     *******************************************************************************/
-   public static String encrypt(String value)
+   public static String encrypt(String value, String column, String messageId)
    {
       try
       {
@@ -73,6 +73,7 @@ public final class EmailBodyEncryption
          new SecureRandom().nextBytes(iv);
          Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
          cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, iv));
+         cipher.updateAAD(aad(column, messageId));
          byte[] encrypted = cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
          return ("enc:v1:" + Base64.getUrlEncoder().withoutPadding().encodeToString(ByteBuffer.allocate(iv.length + encrypted.length).put(iv).put(encrypted).array()));
       }
@@ -85,7 +86,7 @@ public final class EmailBodyEncryption
    /*******************************************************************************
     ** Authenticate before exposing plaintext. Failures never echo ciphertext.
     *******************************************************************************/
-   public static String decrypt(String value)
+   public static String decrypt(String value, String column, String messageId)
    {
       if(value == null || !value.startsWith("enc:v1:"))
       {
@@ -100,6 +101,7 @@ public final class EmailBodyEncryption
          bytes.get(encrypted);
          Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
          cipher.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(128, iv));
+         cipher.updateAAD(aad(column, messageId));
          return (new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8));
       }
       catch(Exception e)
@@ -107,4 +109,29 @@ public final class EmailBodyEncryption
          throw (new IllegalArgumentException("Encrypted email body could not be opened"));
       }
    }
+
+   /*******************************************************************************
+    ** Bind ciphertext to its storage table, column and message identity.
+    *******************************************************************************/
+   private static byte[] aad(String column, String messageId)
+   {
+      String storageColumn = switch(column)
+      {
+         case "subject" -> "subject";
+         case "htmlBody" -> "html_body";
+         case "textBody" -> "text_body";
+         default -> throw (new IllegalArgumentException("Unknown protected email column"));
+      };
+      return (("email_message\n" + storageColumn + "\n" + java.util.Objects.requireNonNull(messageId)).getBytes(StandardCharsets.UTF_8));
+   }
+
+   /*******************************************************************************
+    ** Authenticate and rebind retained ciphertext without exposing plaintext to
+    ** the resend caller. Only delivery callers receive decrypted content.
+    *******************************************************************************/
+   public static String rebind(String value, String column, String oldMessageId, String newMessageId)
+   {
+      return (encrypt(decrypt(value, column, oldMessageId), column, newMessageId));
+   }
+
 }

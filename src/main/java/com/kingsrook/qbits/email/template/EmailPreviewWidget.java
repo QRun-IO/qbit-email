@@ -70,18 +70,22 @@ public class EmailPreviewWidget extends AbstractWidgetRenderer
          QRecord template = templates.getFirst();
          if("MJML".equals(template.getValueString("kind")) && version.getValueString("compiledHtml") == null)
          {
+            if(!com.kingsrook.qbits.email.permissions.EmailPermissionChecker.has(com.kingsrook.qbits.email.permissions.EmailPermissions.MANAGE))
+            {
+               return (output("<p>Not compiled yet. Activate the version or use Preview as a manager.</p>"));
+            }
             EmailVersions.validate(template, version);
          }
-         QRecord rendered = new EmailTemplateRenderer(template, version,
-            new EmailRequest().withVariables(VariableSchema.values(version.getValueString("sampleVariables"))))
-            .render("preview", "https://example.invalid/unsubscribe/preview", false);
+         EmailTemplateRenderer renderer = new EmailTemplateRenderer(template, version,
+            new EmailRequest().withVariables(VariableSchema.values(version.getValueString("sampleVariables"))));
+         QRecord rendered = renderer.render("preview", "https://example.invalid/unsubscribe/preview", false);
          QRecord brand = EmailBrands.resolve(null, template);
          String html = "<div style=\"min-width:0;overflow-wrap:anywhere\"><h3>" + EmailTemplateEngine.escape(rendered.getValueString("subject")) + "</h3>"
             + "<p>Sample preview. Inline rendering; mail clients may display it differently.</p>"
             + sample(rendered.getValueString("htmlBody"), brand, false, 390) + sample(rendered.getValueString("htmlBody"), brand, true, 600)
             + "<h4>Plain text</h4><pre style=\"white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%\">"
             + EmailTemplateEngine.escape(rendered.getValueString("textBody")) + "</pre></div>";
-         return (output(html));
+         return (output(html + "<p>" + EmailTemplateEngine.escape(String.join("; ", renderer.warnings())) + "</p>"));
       }
       catch(IllegalArgumentException e)
       {

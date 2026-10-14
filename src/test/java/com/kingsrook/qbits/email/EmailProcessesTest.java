@@ -146,9 +146,11 @@ class EmailProcessesTest
    @Test
    void backendSendAndScheduledJobs() throws Exception
    {
+      assertThat(QContext.getQInstance().getProcess(EmailProcesses.SEND_TEMPLATED).getBackendStep("send").getInputMetaData().getField("category")).isEmpty();
+      assertThat(QContext.getQInstance().getProcess(EmailProcesses.SEND_AD_HOC).getBackendStep("send").getInputMetaData().getField("category")).isPresent();
       var queued =
             run(
-                  EmailProcesses.SEND_TEMPLATED,
+                  EmailProcesses.SEND_AD_HOC,
                   Map.of(
                         "to",
                         "a@example.com",
@@ -159,6 +161,7 @@ class EmailProcessesTest
                         "category",
                         "NOTIFICATION"));
       assertThat(queued.getValues().get("status")).isEqualTo("QUEUED");
+      assertThat(H2Support.all(EmailTables.MESSAGE).getFirst().getValueString("category")).isEqualTo("NOTIFICATION");
       run(EmailProcesses.DISPATCH, Map.of());
       assertThat(mail.waitForIncomingEmail(2000, 1)).isTrue();
       run(EmailProcesses.MAINTAIN, Map.of());

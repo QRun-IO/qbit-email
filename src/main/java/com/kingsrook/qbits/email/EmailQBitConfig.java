@@ -41,6 +41,8 @@ public class EmailQBitConfig implements QBitConfig
 {
    private com.kingsrook.qbits.email.template.MjmlCompilerInterface mjmlCompiler;
    private java.util.Map<String, com.kingsrook.qbits.email.phi.EmailClassifications.Level> classificationOverrides = java.util.Map.of();
+   private java.util.function.Supplier<com.kingsrook.qbits.email.transport.EmailTransportRegistry> transportRegistryFactory = com.kingsrook.qbits.email.transport.EmailTransportRegistry::new;
+   private Set<String> allowedImageHosts = Set.of();
    private String backendName;
    private String schedulerName;
    private String publicBaseUrl;
@@ -546,4 +548,39 @@ public class EmailQBitConfig implements QBitConfig
       classificationOverrides = java.util.Map.copyOf(overrides);
       return (this);
    }
+
+   /*******************************************************************************
+    ** Additional HTTPS image hosts permitted for approved email content.
+    *******************************************************************************/
+   public Set<String> getAllowedImageHosts()
+   {
+      return (allowedImageHosts);
+   }
+
+   /*******************************************************************************
+    ** Configure exact host names, without wildcards or URL paths.
+    *******************************************************************************/
+   public EmailQBitConfig withAllowedImageHosts(Set<String> hosts)
+   {
+      allowedImageHosts = hosts.stream().map(host -> host.toLowerCase(java.util.Locale.ROOT)).collect(java.util.stream.Collectors.toUnmodifiableSet());
+      return (this);
+   }
+
+   /*******************************************************************************
+    ** Fresh transports for every dispatcher, including process actions.
+    *******************************************************************************/
+   public com.kingsrook.qbits.email.transport.EmailTransportRegistry newTransportRegistry()
+   {
+      return (transportRegistryFactory.get());
+   }
+
+   /*******************************************************************************
+    ** Host-scoped transport injection for embedded applications and local demos.
+    *******************************************************************************/
+   public EmailQBitConfig withTransportRegistryFactory(java.util.function.Supplier<com.kingsrook.qbits.email.transport.EmailTransportRegistry> factory)
+   {
+      transportRegistryFactory = java.util.Objects.requireNonNull(factory);
+      return (this);
+   }
+
 }

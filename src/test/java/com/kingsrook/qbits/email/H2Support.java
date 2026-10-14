@@ -20,8 +20,6 @@
 
 package com.kingsrook.qbits.email;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.sql.Connection;
 import java.util.List;
 import java.util.UUID;
@@ -72,7 +70,7 @@ public final class H2Support
    {
       try(Connection connection = new ConnectionManager().getConnection(backend))
       {
-         for(String sql : Files.readString(Path.of("src/test/resources/email-h2.sql")).split(";"))
+         for(String sql : new String(H2Support.class.getResourceAsStream("/email-h2.sql").readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).split(";"))
          {
             if(!sql.isBlank())
             {

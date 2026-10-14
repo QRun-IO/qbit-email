@@ -175,8 +175,11 @@ public final class EmailVersions
     *******************************************************************************/
    public static void validate(QRecord template, QRecord version) throws QException
    {
+      requireEdit(template, false);
       if("MJML".equals(template.getValueString("kind")))
       {
+         CliMjmlCompiler.rejectIncludes(version.getValueString("bodySource"));
+         EmailTemplateEngine.validateHtml(version.getValueString("bodySource"));
          if(EmailRuntime.config().getMjmlCompiler() == null)
          {
             throw (new IllegalArgumentException("MJML activation needs a configured compiler"));

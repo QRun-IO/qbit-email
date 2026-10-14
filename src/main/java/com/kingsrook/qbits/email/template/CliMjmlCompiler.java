@@ -47,10 +47,11 @@ public class CliMjmlCompiler implements MjmlCompilerInterface
    @Override
    public String compile(String source)
    {
+      rejectIncludes(source);
       Process process = null;
       try(var executor = Executors.newVirtualThreadPerTaskExecutor())
       {
-         process = new ProcessBuilder(binary, "-i", "-s").redirectError(ProcessBuilder.Redirect.DISCARD).start();
+         process = processBuilder().start();
          Process running = process;
          var task = executor.submit(() ->
          {
@@ -101,4 +102,32 @@ public class CliMjmlCompiler implements MjmlCompilerInterface
          }
       }
    }
+
+   /*******************************************************************************
+    ** MJML 4.x/5 supports allowIncludes=false. Refusing the source tag as well
+    ** removes include resolution and its dependence on the inherited directory.
+    *******************************************************************************/
+   public static void rejectIncludes(String source)
+   {
+      if(source != null && java.util.regex.Pattern.compile("(?i)<\\s*mj-include\\b").matcher(source).find())
+      {
+         throw (new IllegalArgumentException("MJML includes are not allowed"));
+      }
+   }
+
+   /*******************************************************************************
+    ** Package seam for checking child isolation without executing a compiler.
+    *******************************************************************************/
+   ProcessBuilder processBuilder()
+   {
+      ProcessBuilder builder = new ProcessBuilder(binary, "-i", "-s", "--config.allowIncludes=false");
+      String path = builder.environment().get("PATH");
+      builder.environment().clear();
+      if(path != null)
+      {
+         builder.environment().put("PATH", path);
+      }
+      return (builder.redirectError(ProcessBuilder.Redirect.DISCARD));
+   }
+
 }

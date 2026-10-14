@@ -80,6 +80,26 @@ public final class EmailClassifications
    }
 
    /*******************************************************************************
+    ** Schema declarations alone cannot attest a record's classification source.
+    *******************************************************************************/
+   public static boolean hasSource(QTableMetaData table, String field, EmailQBitConfig config)
+   {
+      if(config.getClassificationOverrides().containsKey(table.getName() + "." + field))
+      {
+         return (true);
+      }
+      try
+      {
+         Class<?> core = Class.forName("com.kingsrook.qqq.backend.core.actions.ai.AiDataClassifications");
+         return (core.getMethod("ofField", QTableMetaData.class, String.class).invoke(null, table, field) instanceof Enum<?>);
+      }
+      catch(ReflectiveOperationException e)
+      {
+         return (false);
+      }
+   }
+
+   /*******************************************************************************
     ** PII has the same email approval requirement as PHI.
     *******************************************************************************/
    public static boolean sensitive(Level level)

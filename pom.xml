@@ -117,6 +117,12 @@
          <scope>test</scope>
       </dependency>
       <dependency>
+         <groupId>com.kingsrook.qqq</groupId>
+         <artifactId>qqq-frontend-next</artifactId>
+         <version>1.0.0-RC.19</version>
+         <scope>test</scope>
+      </dependency>
+      <dependency>
          <groupId>com.icegreen</groupId>
          <artifactId>greenmail-junit5</artifactId>
          <version>${greenmail.version}</version>
@@ -178,6 +184,11 @@
             <groupId>org.jacoco</groupId>
             <artifactId>jacoco-maven-plugin</artifactId>
             <version>${jacoco.version}</version>
+            <configuration>
+               <excludes>
+                  <exclude>com/kingsrook/qbits/email/demo/**</exclude>
+               </excludes>
+            </configuration>
             <executions>
                <execution>
                   <id>prepare-agent</id>
