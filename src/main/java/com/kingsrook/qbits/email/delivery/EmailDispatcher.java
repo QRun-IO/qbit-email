@@ -350,9 +350,9 @@ public class EmailDispatcher
          {
             safeError = "Credentials missing or refused";
          }
-         if(error != null && "Provider transport not available until phase (b)".equals(error.getMessage()))
+         if(error != null && "Gmail API sending is specified but not built; use GMAIL_SMTP".equals(error.getMessage()))
          {
-            safeError = "Provider transport not available until phase (b)";
+            safeError = "Gmail API sending is specified but not built; use GMAIL_SMTP";
          }
          EmailStore.update(EmailTables.ATTEMPT, new QRecord().withValue("id", claim.attempt().getValue("id"))
             .withValue("outcome", success ? "SUCCEEDED" : providerLevel ? "PROVIDER_FAILURE" : permanent ? "PERMANENT_FAILURE" : "TRANSIENT_FAILURE")

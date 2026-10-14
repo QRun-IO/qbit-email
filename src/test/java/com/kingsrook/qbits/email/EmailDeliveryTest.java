@@ -498,13 +498,13 @@ class EmailDeliveryTest
                         })
                         .sendNow(queued.messageId()))
             .isEqualTo(EmailDispatcher.SendResult.DEAD_LETTER);
-      SystemWrites.updateOne(
-            EmailTables.PROVIDER, new QRecord().withValue("id", 1).withValue("kind", "POSTMARK"));
       var future = EmailService.send(request());
+      SystemWrites.updateOne(
+            EmailTables.PROVIDER, new QRecord().withValue("id", 1).withValue("kind", "GMAIL_API"));
       assertThat(new EmailDispatcher().sendNow(future.messageId()))
             .isEqualTo(EmailDispatcher.SendResult.DEAD_LETTER);
-      assertThatThrownBy(() -> new EmailTransportRegistry().get("POSTMARK"))
-            .hasMessageContaining("phase (b)");
+      assertThatThrownBy(() -> new EmailTransportRegistry().get("GMAIL_API"))
+            .hasMessage("Gmail API sending is specified but not built; use GMAIL_SMTP");
    }
 
    /*******************************************************************************

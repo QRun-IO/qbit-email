@@ -48,6 +48,12 @@ public class SmtpEmailTransport implements EmailTransport
       {
          throw (new EmailTransportException("SMTP sign-in needs STARTTLS or TLS", false).withProviderLevel(true));
       }
+      if("GMAIL_SMTP".equals(settings.value("kind"))
+         && (settings.value("usernameEnvName") == null || settings.value("secretEnvName") == null
+         || (settings.value("security") != null && !"STARTTLS".equals(settings.value("security")))))
+      {
+         throw (new EmailTransportException("Gmail SMTP needs both credential names and STARTTLS", false).withProviderLevel(true));
+      }
       Properties properties = new Properties();
       properties.setProperty("mail.smtp.connectiontimeout", "10000");
       properties.setProperty("mail.smtp.timeout", "15000");
