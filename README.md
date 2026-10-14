@@ -1,14 +1,15 @@
 # QBit Email
 
-Phase (a), part 1: a durable email outbox for QQQ, with SMTP and Amazon SES transports,
+Phases (a) and (b): a durable email outbox for QQQ, with SMTP, Amazon SES, Postmark,
+SendGrid, Mailgun and Gmail SMTP transports,
 suppression, retries, provider health, record actions, and the core messaging bridge.
 Every send is queued in `email_message` before a dispatcher contacts a provider.
 
 The approved [design](docs/DESIGN.md) covers later phases too. This implementation
 accepts ad-hoc Markdown, HTML and text. Template rendering, branding, PHI handling and
 the full home dashboard belong to part 2. Template and variable-bearing requests are
-refused in part 1; attachments are refused. Tracking webhooks, unsubscribe and the
-additional HTTP transports remain later phases.
+refused in part 1; attachments are refused. Tracking webhooks and unsubscribe remain
+later phases.
 
 ## Install
 
@@ -67,6 +68,19 @@ insert/update/delete capabilities. Labels contain no status decorations.
 
 ## Providers and credentials
 
+See the [provider setup guide](docs/PROVIDERS.md) for row fields, DNS/domain setup,
+limits, Gmail app passwords and the webhook configuration planned for phase (c).
+
+| Kind | Transport | Status |
+|---|---|---|
+| SMTP | Relay or authenticated SMTP, STARTTLS / TLS | Available |
+| SES | AWS SES v2, raw MIME | Available |
+| POSTMARK | HTTPS JSON, server token and message stream | Available |
+| SENDGRID | HTTPS JSON, bearer API key | Available |
+| MAILGUN | HTTPS MIME multipart, US / EU | Available |
+| GMAIL_SMTP | smtp.gmail.com:587, STARTTLS and app password | Available |
+| GMAIL_API | OAuth Gmail API | Deferred; use GMAIL_SMTP |
+
 Create the first enabled provider with `isDefault=true`. When any providers are
 enabled, exactly one must be the enabled default. Switch defaults in a batch update,
 clearing the old default first. A nullable unique `default_slot` backs the validation.
@@ -91,11 +105,11 @@ for the selected kind:
 
 | Kind | Default allowed names |
 |---|---|
-| SMTP / GMAIL_SMTP | `EMAIL_SMTP_USERNAME`, `EMAIL_SMTP_PASSWORD`, `EMAIL_GMAIL_USERNAME`, `EMAIL_GMAIL_APP_PASSWORD` |
+| SMTP / GMAIL_SMTP | `EMAIL_SMTP_USERNAME`, `EMAIL_SMTP_PASSWORD`, `EMAIL_GMAIL_USERNAME`, `EMAIL_GMAIL_APP_PASSWORD`, `GMAIL_USERNAME`, `GMAIL_APP_PASSWORD` |
 | SES | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` |
-| POSTMARK | `EMAIL_POSTMARK_SERVER_TOKEN`, `EMAIL_POSTMARK_WEBHOOK_PASSWORD` |
-| SENDGRID | `EMAIL_SENDGRID_API_KEY`, `EMAIL_SENDGRID_WEBHOOK_PUBLIC_KEY` |
-| MAILGUN | `EMAIL_MAILGUN_API_KEY`, `EMAIL_MAILGUN_SIGNING_KEY` |
+| POSTMARK | `POSTMARK_SERVER_TOKEN`, `POSTMARK_WEBHOOK_PASSWORD`; legacy `EMAIL_POSTMARK_SERVER_TOKEN`, `EMAIL_POSTMARK_WEBHOOK_PASSWORD` |
+| SENDGRID | `SENDGRID_API_KEY`, `SENDGRID_WEBHOOK_PUBLIC_KEY`; legacy `EMAIL_SENDGRID_API_KEY`, `EMAIL_SENDGRID_WEBHOOK_PUBLIC_KEY` |
+| MAILGUN | `MAILGUN_API_KEY`, `MAILGUN_WEBHOOK_SIGNING_KEY`; legacy `EMAIL_MAILGUN_API_KEY`, `EMAIL_MAILGUN_SIGNING_KEY` |
 | GMAIL_API | `EMAIL_GMAIL_CLIENT_ID`, `EMAIL_GMAIL_CLIENT_SECRET`, `EMAIL_GMAIL_REFRESH_TOKEN` |
 
 Allowlisting does not automatically select a name. Empty SMTP references mean no auth;
@@ -106,8 +120,16 @@ resolved during an attempt and never retained, audited, returned or logged. The
 provider record's display-only fields return only `Set` / `Not set`; checking presence
 necessarily invokes the resolver too. Enqueue and internal queries do not resolve it.
 
-POSTMARK, SENDGRID, MAILGUN and GMAIL_API have metadata but no transport in this part.
-Their delivery attempts fail permanently with `not available until phase (b)`.
+POSTMARK, SENDGRID and MAILGUN require a secret environment name. Mailgun also
+requires a sending domain and US/EU region. Gmail SMTP requires both credential
+names and STARTTLS. GMAIL_API is refused with
+`Gmail API sending is specified but not built; use GMAIL_SMTP`.
+
+HTTP transports use fixed HTTPS endpoints, 10-second connect and 30-second request
+timeouts, and no redirects. HTTP 429/5xx retry with optional Retry-After; account
+and credential failures pause the provider. Tracking is explicitly controlled by
+`trackOpens` / `trackClicks`, off by default. Outbound tracking settings do not
+install the event webhook receiver; that arrives in phase (c).
 
 ## Sending
 
@@ -250,7 +272,7 @@ modules to these declarations.
 ```
 
 Windows can use `./mvnw.cmd -o -q verify`. No new dependencies are required. Tests use
-H2, GreenMail and a fake SES client, including transaction rollback, concurrent claims,
+H2, GreenMail, a fake SES client and local HTTP servers, including transaction rollback, concurrent claims,
 concurrent idempotency, shared rate budgets, health recovery and process screens.
 See [implementation notes](docs/PART1-NOTES.md) for design/API accommodations.
 

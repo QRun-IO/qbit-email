@@ -6,6 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- Phase (b) Postmark, SendGrid and Mailgun HTTP transports with fixed HTTPS endpoints, bounded requests, tracking options, safe error classification and Retry-After support; no new dependencies or filesystem storage.
+- Strict Gmail SMTP credential/STARTTLS validation, provider-specific credential and webhook environment defaults, and the [provider setup guide](docs/PROVIDERS.md).
+- HTTP request-contract tests and local-server end-to-end outbox tests covering success, provider failures, permanent rejection, retries and secret-safe stored errors.
 - Phase (a), part 1 email tables, PostgreSQL DDL, enum sources, child relations, permissions and Email app navigation.
 - Provider validation with environment-name allowlists and presence-only credential displays.
 - Transactional ad-hoc EmailService, idempotency, suppression and a replaceable Markdown/HTML/text renderer.

@@ -87,6 +87,36 @@ public final class EmailProviderSettings
    }
 
    /*******************************************************************************
+    ** A domain is a single DNS name, never a URL or a path component escape.
+    *******************************************************************************/
+   public static boolean validSendingDomain(String domain)
+   {
+      return (domain != null && domain.length() <= 253
+         && domain.matches("(?i)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+"));
+   }
+
+   /*******************************************************************************
+    ** Tracking is opt-in; null database values mean disabled.
+    *******************************************************************************/
+   boolean enabled(String field)
+   {
+      return (Boolean.TRUE.equals(row.getValueBoolean(field)));
+   }
+
+   /*******************************************************************************
+    ** HTTP providers must never send a missing token as the literal string null.
+    *******************************************************************************/
+   String requiredSecret() throws EmailTransportException
+   {
+      String secret = resolve("secretEnvName");
+      if(secret == null)
+      {
+         throw (new EmailTransportException("Provider needs a secret environment name", false).withProviderLevel(true));
+      }
+      return (secret);
+   }
+
+   /*******************************************************************************
     ** Resolve an explicitly named secret immediately before sending.
     *******************************************************************************/
    String resolve(String field) throws EmailTransportException
