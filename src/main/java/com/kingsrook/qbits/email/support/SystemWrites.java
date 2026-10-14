@@ -152,7 +152,7 @@ public final class SystemWrites
     *******************************************************************************/
    public static List<QRecord> query(String table, QQueryFilter filter) throws QException
    {
-      return (call(() -> new QueryAction().execute(new QueryInput(table).withFilter(filter)).getRecords()));
+      return (call(() -> new QueryAction().execute(new QueryInput(table).withShouldFetchHeavyFields(true).withShouldOmitHiddenFields(false).withFilter(filter)).getRecords()));
    }
 
 
@@ -162,7 +162,7 @@ public final class SystemWrites
     *******************************************************************************/
    public static List<QRecord> query(String table, QQueryFilter filter, QBackendTransaction transaction) throws QException
    {
-      return (call(() -> new QueryAction().execute(new QueryInput(table).withFilter(filter).withTransaction(transaction)).getRecords()));
+      return (call(() -> new QueryAction().execute(new QueryInput(table).withShouldFetchHeavyFields(true).withShouldOmitHiddenFields(false).withFilter(filter).withTransaction(transaction)).getRecords()));
    }
 
 

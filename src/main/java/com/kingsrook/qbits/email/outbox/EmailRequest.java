@@ -31,7 +31,7 @@ import com.kingsrook.qqq.backend.core.actions.QBackendTransaction;
 
 
 /*******************************************************************************
- ** Synchronous enqueue request. Templates and classified variables arrive in part 2.
+ ** Synchronous enqueue request with explicit record provenance.
  *******************************************************************************/
 public class EmailRequest
 {
@@ -48,7 +48,7 @@ public class EmailRequest
    private String templateName;
    private String brandName;
    private String locale = "en";
-   private EmailCategory category = EmailCategory.TRANSACTIONAL;
+   private EmailCategory category;
    private String idempotencyKey;
    private Instant sendAfter;
    private String linkedTableName;
@@ -57,6 +57,7 @@ public class EmailRequest
    private String senderProcess;
    private QBackendTransaction transaction;
    private String transactionBackendName;
+   private Map<String, RecordVariable> recordVariables = new LinkedHashMap<>();
    private Map<String, Serializable> variables = new LinkedHashMap<>();
    private Map<String, Serializable> securityValues = new LinkedHashMap<>();
 
@@ -118,7 +119,7 @@ public class EmailRequest
    }
 
    /*******************************************************************************
-    ** Accept template variables as a seam; part 1 refuses variable-bearing requests.
+    ** Bind one schema variable.
     *******************************************************************************/
    public EmailRequest withVariable(String name, Serializable value)
    {
@@ -131,7 +132,7 @@ public class EmailRequest
     *******************************************************************************/
    public EmailRequest withRecordVariable(String name, String table, Serializable id)
    {
-      variables.put(name, new LinkedHashMap<>(Map.of("table", table, "id", id)));
+      recordVariables.put(name, new RecordVariable(table, id));
       return (this);
    }
 
@@ -589,5 +590,20 @@ public class EmailRequest
    {
       this.securityValues = securityValues;
       return (this);
+   }
+
+   /*******************************************************************************
+    ** A record reference is distinct from an ordinary JSON object.
+    *******************************************************************************/
+   public record RecordVariable(String table, Serializable id)
+   {
+   }
+
+   /*******************************************************************************
+    ** Record bindings, read under the sender session by the service.
+    *******************************************************************************/
+   public Map<String, RecordVariable> getRecordVariables()
+   {
+      return (recordVariables);
    }
 }

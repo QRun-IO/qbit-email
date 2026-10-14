@@ -29,7 +29,6 @@ import com.kingsrook.qqq.backend.core.actions.dashboard.widgets.AbstractWidgetRe
 import com.kingsrook.qqq.backend.core.exceptions.QException;
 import com.kingsrook.qqq.backend.core.model.actions.widgets.RenderWidgetInput;
 import com.kingsrook.qqq.backend.core.model.actions.widgets.RenderWidgetOutput;
-import com.kingsrook.qqq.backend.core.model.dashboard.widgets.RawHTML;
 import com.kingsrook.qqq.backend.core.model.dashboard.widgets.WidgetType;
 import com.kingsrook.qqq.backend.core.model.metadata.code.QCodeReference;
 import com.kingsrook.qqq.backend.core.model.metadata.dashboard.QWidgetMetaData;
@@ -39,7 +38,7 @@ import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
 
 
 /*******************************************************************************
- ** Email app with a placeholder overview and the five main tables in navigation.
+ ** Email app with viewer-scoped dashboard widgets and the five main tables in navigation.
  ** Versions and attempts are child lists, and processes are record actions.
  *******************************************************************************/
 public final class EmailApp
@@ -59,14 +58,16 @@ public final class EmailApp
 
 
    /*******************************************************************************
-    ** Placeholder home widget.
+    ** Standard home and record preview widgets.
     *******************************************************************************/
    public static List<QWidgetMetaData> widgets()
    {
       return (List.of(
-         new QWidgetMetaData().withName(HOME_WIDGET).withLabel("Overview").withType(WidgetType.HTML.getType())
-            .withCodeReference(new QCodeReference(HomeRenderer.class)).withGridColumns(12).withIsCard(false)
-            .withPermissionRules(EmailTables.permissionRules())));
+         widget(HOME_WIDGET, "Overview", WidgetType.HTML.getType(), HomeRenderer.class),
+         widget("emailHourly", "Sends per hour - 24h", WidgetType.LINE_CHART.getType(), HomeRenderer.class),
+         widget("emailSuppressionGrowth", "Suppression growth - 30 days", WidgetType.LINE_CHART.getType(), HomeRenderer.class),
+         widget("emailTemplatePreview", "Preview", WidgetType.HTML.getType(), com.kingsrook.qbits.email.template.EmailPreviewWidget.class)));
+
    }
 
 
@@ -81,7 +82,7 @@ public final class EmailApp
          .withLabel(config.getAppLabel())
          .withIcon(new QIcon("mail"))
          .withPermissionRules(EmailTables.permissionRules())
-         .withWidgets(List.of(HOME_WIDGET));
+         .withWidgets(List.of(HOME_WIDGET, "emailHourly", "emailSuppressionGrowth"));
       for(String name : EmailTables.MAIN)
       {
          if(tables.containsKey(name))
@@ -105,10 +106,23 @@ public final class EmailApp
       @Override
       public RenderWidgetOutput render(RenderWidgetInput input) throws QException
       {
-         return (new RenderWidgetOutput(new RawHTML(null, "<p>Use Messages to follow queued email and Providers to manage delivery.</p>")));
+         return (new RenderWidgetOutput(switch(input.getWidgetMetaData().getName())
+            {
+               case "emailHourly" -> EmailHome.hourly();
+               case "emailSuppressionGrowth" -> EmailHome.suppressions();
+               default -> EmailHome.overview();
+            }));
       }
    }
 
 
 
+   /*******************************************************************************
+    ** Full-width widgets follow the Alerts home pattern.
+    *******************************************************************************/
+   private static QWidgetMetaData widget(String name, String label, String type, Class<?> renderer)
+   {
+      return (new QWidgetMetaData().withName(name).withLabel(label).withType(type).withGridColumns(12).withIsCard(false)
+         .withShowReloadButton(true).withCodeReference(new QCodeReference(renderer)).withPermissionRules(EmailTables.permissionRules()));
+   }
 }

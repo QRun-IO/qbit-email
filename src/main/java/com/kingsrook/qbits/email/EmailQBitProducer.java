@@ -143,7 +143,8 @@ public class EmailQBitProducer implements QBitMetaDataProducer<EmailQBitConfig>
       for(QTableMetaData table : EmailTables.tables(qBitConfig))
       {
          Class<?> customizer = EmailTables.PROVIDER.equals(table.getName()) ? EmailTableCustomizers.ProviderCustomizer.class
-            : EmailTables.SUPPRESSION.equals(table.getName()) ? EmailTableCustomizers.SuppressionCustomizer.class : null;
+            : EmailTables.SUPPRESSION.equals(table.getName()) ? EmailTableCustomizers.SuppressionCustomizer.class
+            : List.of(EmailTables.TEMPLATE, EmailTables.VERSION, EmailTables.BRAND).contains(table.getName()) ? com.kingsrook.qbits.email.template.EmailTemplateCustomizers.class : null;
          if(customizer != null)
          {
             table.withCustomizer(TableCustomizers.PRE_INSERT_RECORD, new QCodeReference(customizer))

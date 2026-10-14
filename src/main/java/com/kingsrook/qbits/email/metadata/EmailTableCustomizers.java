@@ -294,6 +294,21 @@ public final class EmailTableCustomizers
       @Override
       public List<QRecord> postQuery(QueryOrGetInputInterface input, List<QRecord> records)
       {
+         if(!SystemWrites.active())
+         {
+            for(QRecord row : records)
+            {
+               for(String field : List.of("subject", "htmlBody", "textBody"))
+               {
+                  String value = row.getValueString(field);
+                  if(value != null && value.startsWith("enc:v1:"))
+                  {
+                     row.setValue(field, "[encrypted]");
+                     row.setDisplayValue(field, "[encrypted]");
+                  }
+               }
+            }
+         }
          if(input.getShouldGenerateDisplayValues())
          {
             for(QRecord row : records)

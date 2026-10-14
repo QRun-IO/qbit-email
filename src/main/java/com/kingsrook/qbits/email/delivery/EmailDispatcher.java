@@ -178,6 +178,10 @@ public class EmailDispatcher
       EmailTransportException error = null;
       try
       {
+         if(Boolean.TRUE.equals(claim.message().getValueBoolean("phiApproved")))
+         {
+            com.kingsrook.qbits.email.template.EmailTemplateRenderer.checkProvider(claim.provider());
+         }
          result = transports.get(claim.provider().getValueString("kind")).send(envelope(claim.message()), new EmailProviderSettings(claim.provider(), EmailRuntime.config()));
       }
       catch(EmailTransportException e)
@@ -397,8 +401,28 @@ public class EmailDispatcher
    {
       return (new EmailEnvelope().withMessageId(message.getValueString("id")).withFrom(message.getValueString("fromAddress"))
          .withTo(split(message.getValueString("toAddresses"))).withCc(split(message.getValueString("ccAddresses"))).withBcc(split(message.getValueString("bccAddresses")))
-         .withReplyTo(message.getValueString("replyTo")).withSubject(message.getValueString("subject"))
-         .withHtmlBody(message.getValueString("htmlBody")).withTextBody(message.getValueString("textBody")));
+         .withReplyTo(message.getValueString("replyTo")).withSubject(content(message, "subject"))
+         .withHtmlBody(content(message, "htmlBody"))
+         .withTextBody(content(message, "textBody"))
+         .withHeaders(message.getValueString("unsubscribeUrl") == null ? java.util.Map.of() : java.util.Map.of("List-Unsubscribe", "<" + message.getValueString("unsubscribeUrl") + ">", "List-Unsubscribe-Post", "List-Unsubscribe=One-Click")));
+   }
+
+   /*******************************************************************************
+    ** Only policy-marked messages may invoke body decryption. A caller-supplied
+    ** enc:v1 string in ad-hoc content is text, never a decryption capability.
+    *******************************************************************************/
+   private static String content(QRecord message, String field)
+   {
+      String value = message.getValueString(field);
+      if(!Boolean.TRUE.equals(message.getValueBoolean("phiApproved")))
+      {
+         return (value);
+      }
+      if(value != null && !value.startsWith("enc:v1:"))
+      {
+         throw (new IllegalArgumentException("Protected email content must be encrypted"));
+      }
+      return (com.kingsrook.qbits.email.phi.EmailBodyEncryption.decrypt(value));
    }
 
    /*******************************************************************************

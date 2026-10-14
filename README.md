@@ -1,20 +1,18 @@
 # QBit Email
 
-Phase (a), part 1: a durable email outbox for QQQ, with SMTP and Amazon SES transports,
-suppression, retries, provider health, record actions, and the core messaging bridge.
-Every send is queued in `email_message` before a dispatcher contacts a provider.
+Phase (a): a durable email outbox for QQQ with SMTP/SES delivery, versioned
+Markdown/HTML/MJML templates, branding, classified variables, PHI protection,
+preview widgets, and a real-data dashboard. Every send goes through `email_message`.
 
-The approved [design](docs/DESIGN.md) covers later phases too. This implementation
-accepts ad-hoc Markdown, HTML and text. Template rendering, branding, PHI handling and
-the full home dashboard belong to part 2. Template and variable-bearing requests are
-refused in part 1; attachments are refused. Tracking webhooks, unsubscribe and the
-additional HTTP transports remain later phases.
+The [design](docs/DESIGN.md) includes later phases. Attachments, tracking webhook
+handlers, unsubscribe handlers, Preferences, and additional HTTP transports remain
+later work. Preview uses the standard widget endpoint; the dedicated preview API
+arrives with RC.6.
 
 ## Install
 
 Requires Java 21, QQQ **4.1.0-RC.5**, and a transactional RDBMS with the supplied unique
-constraints. Apply [the PostgreSQL DDL](docs/ddl/email-postgres.sql) before producing
-the qbit. SQL timestamps store UTC values without a timezone, matching QQQ RC.5.
+constraints. Apply [the PostgreSQL DDL](docs/ddl/email-postgres.sql) before producing the qbit. SQL timestamps store UTC values without a timezone, matching QQQ RC.5.
 The physical table names equal their metadata names; `backendName` selects the host's
 QQQ database backend, as it does in qbit-webhooks.
 
@@ -45,9 +43,9 @@ in a static variable.
 |---|---|---|
 | `email_message` | Messages | Qbit only; people use record actions |
 | `email_message_attempt` | Attempts on a message | Qbit only |
-| `email_template` | Templates | `email.manage`; rendering arrives in part 2 |
-| `email_template_version` | Versions on a template | `email.manage`; activation arrives in part 2 |
-| `email_brand` | Brands | `email.manage`; rendering arrives in part 2 |
+| `email_template` | Templates | `email.manage`; template edit grants also apply |
+| `email_template_version` | Versions on a template | Draft edits only; lifecycle uses record actions |
+| `email_brand` | Brands | `email.manage`; template edit grants also apply |
 | `email_suppression` | Suppressions | `email.manage`; changing/removing a complaint needs `email.admin` |
 | `email_provider` | Providers, with child Messages | `email.admin`, including reads and test sends |
 
@@ -126,8 +124,8 @@ Use `withHtmlBody` or `withTextBody` instead of Markdown, with optional explicit
 alongside HTML. `withFrom`, `withReplyTo`, `withBcc`, `withProviderName`, `withSendAfter`,
 and `withLocale` are supported. `sendingDomain`, when present, must match the sender's
 domain. Addresses are parsed strictly; header newlines are refused. Markdown raw HTML
-and unsafe URL schemes are disabled. `EmailRenderer` is the replacement seam for
-part 2. Both alternatives are stored at enqueue time and reused on retries.
+and unsafe URL schemes are disabled. Templates always use the validated template renderer. The ad-hoc renderer extension
+remains compatible. Both alternatives are stored at enqueue time and reused on retries.
 
 Results expose `messageId()`, `status()` (`QUEUED`, `DUPLICATE`, `SUPPRESSED`, `REFUSED`)
 and `reasons()`. Idempotency is global within the outbox. A repeated key returns the
@@ -152,6 +150,120 @@ except UNSUBSCRIBE cannot block TRANSACTIONAL or SECURITY. Category suppressions
 to NOTIFICATION and MARKETING. Expired rows are ignored. Partial suppression drops
 only matching recipients and records them in `suppressedAddresses`; all-suppressed
 messages remain visible with SUPPRESSED status and never consume an attempt.
+
+## Templates, variables and branding
+
+Create an `email_template`, then use **New Version** to copy the active or latest
+version into a DRAFT. Edit its source, schema and synthetic sample values. **Activate
+Version** validates syntax, samples, classifications, brand contrast and optional
+MJML compilation, then retires the previous active version for that locale in one
+transaction. ACTIVE and RETIRED versions are immutable. Template-specific
+`editPermissionName` applies to CRUD and actions, in addition to the email permission;
+even email administrators need that explicit grant. Trusted system writes may bypass it.
+
+```java
+EmailService.send(new EmailRequest()
+   .withTemplateName("order_ready")
+   .withTo("pat@example.com")
+   .withRecordVariable("order", "order", 123)
+   .withVariable("count", 3)
+   .withLocale("en"));
+```
+
+A schema is a JSON list, for example:
+
+```json
+[
+  {"name":"order","label":"Order","type":"RECORD","required":true},
+  {"name":"count","label":"Items","type":"NUMBER","required":true},
+  {"name":"link","type":"URL","classification":"PUBLIC"}
+]
+```
+
+Types are STRING, NUMBER, DATE, DATE_TIME, BOOLEAN, URL, LIST and RECORD. Optional
+`table`/`field` bind a variable's classification to metadata. URL values must be
+absolute HTTP(S) URLs. Use `{{name}}`, `{{order.number}}`, `{{name|fallback text}}`,
+`{{#if count}}...{{/if}}`, and `{{#each items}}{{@index}}: {{this.name}}{{/each}}`.
+`this` also supports scalar list elements. Empty/null/false/zero values are false.
+Unknown variables, unsupported helpers, unclosed expressions and mismatched blocks
+produce line-numbered errors. Records and lists allow dynamic child paths; declare
+specific dotted entries when child types/requiredness matter. There is no raw output.
+HTML values are escaped; Markdown values cannot inject Markdown syntax. Subject and
+text contexts use plain values, with subject newlines refused.
+
+Built-ins are `brand.*` (snake_case names such as `label`, `site_url`, `primary_color`),
+`message.id` (the actual outbox primary key), `now` (UTC), and `unsubscribe_url`.
+The latter is empty for TRANSACTIONAL/SECURITY and when no notification opt-out key
+is configured. The requested locale resolves to an ACTIVE version, falling back to
+`en`. The template supplies the category unless the request overrides it.
+
+Brand precedence is request name, template brand, the configured app's brand,
+default brand, then the built-in neutral brand. Markdown uses CommonMark tables and
+autolinks; raw HTML is escaped. `[Label](https://example.com){.button}` creates a table
+button. The 600px shell includes preheader, logo variants, footer, social links and
+light/dark colors; marketing requires a postal address. Brand saves and activation
+require 4.5:1 text and button contrast in both modes. Optional `darkPrimaryColor` and
+`darkButtonTextColor` fall back to their light counterparts. Colors use `#RRGGBB`.
+
+HTML versions retain authored HTML, with escaped variables and an opt-out footer
+before `</body>`. For MJML configure `withMjmlCompiler(new CliMjmlCompiler(binaryPath))`
+or another compiler implementation. Compilation uses stdin/stdout only, with a
+20-second timeout; the stored `compiledHtml` is reused for sends. No runtime files,
+source files or compiler temp files are written by this qbit.
+
+The record Preview widget uses synthetic `sampleVariables`, sanitized inline light
+(390px maximum) and dark (600px maximum) samples plus wrapping plain text. Next's
+sanitizer removes iframes and style blocks, so this preview is not an exact mail-client
+emulator. Draft MJML is compiled in memory for preview when a compiler is configured;
+preview never stores the result or changes the version.
+
+## PHI and PII
+
+`withRecordVariable` reads through `QueryAction` in the sender's QContext; it does not
+open an authorized scope. Core password masking is preserved. RC.5 does not enforce
+ordinary `FieldSecurityLock` during QueryAction, so the email record loader also
+applies the field lock against the sender's security keys before copying any values.
+Classification precedence is reflective core `AiDataClassifications.ofField`, config
+`classificationOverrides`, schema declaration, then PUBLIC.
+
+PII/PHI variables require **Approve For PHI** (`email.admin`) on the exact version.
+Approval records actor/date and `approvedVersionId`; it freezes an approved draft.
+A new sensitive version must be approved before activation. Activating a version
+without its own approval clears the template's old approval. Approval of one locale
+version does not approve another locale. PHI-approved templates cannot be MARKETING,
+use provider open/click tracking, or use a provider without `phiAllowed`. Provider
+attestation and tracking are checked again immediately before dispatch.
+
+`email_secure_message` is created transactionally on its first send. It needs only
+a required URL variable `link` and brand built-ins; use it to send a sign-in link
+without putting patient data into email.
+
+PII/PHI snapshot values become `hmac:v1:<keyId>:<base64url>`, or `changed:v1` without
+a valid base64 `QQQ_AUDIT_HMAC_KEY`. Record tokens bind table, field and primary key;
+context tokens bind `email`, template name, variable name and message id. Context
+booleans and values with fewer than four distinct characters always use `changed:v1`.
+`shred:v1` is reserved for future core wipe-rule record fields and is never produced
+for context values. The classification and token helpers are explicit RC.7 stand-ins.
+
+PHI-approved subjects and HTML/text bodies are AES-256-GCM encrypted as
+`enc:v1:<base64url(iv|ciphertext|tag)>`, using SHA-256 of `QQQ_EMAIL_BODY_KEY`.
+Missing keys refuse the send before an outbox insert. Only dispatch decrypts; query,
+record and API displays show `[encrypted]`, while home shows `Secure message`.
+Resend preserves ciphertext and policy; its token snapshot stays bound to the original
+message, which the new message links to. Errors and logs omit provider diagnostics
+and content. Keys resolve through `secretResolver`; no secret values are stored.
+
+NOTIFICATION/MARKETING templates prepare footer links and headers using
+`QQQ_EMAIL_UNSUBSCRIBE_KEY` and `publicBaseUrl`; marketing refuses without them.
+Tokens bind the message, recipient-envelope hash and category. The phase-(c)
+unsubscribe route and Preferences are still pending: signed links are prepared here,
+but this qbit alone does not yet serve the unsubscribe destination. Do not deploy
+opt-out mail without that receiving handler.
+
+The home uses viewer-scoped counts and queries, UTC hour/day charts, provider health
+(admins), and 20 recent messages with masked recipients. No sample data or sampled
+counts are used. Bounce/complaint totals use dedicated event timestamps, populated
+by the future webhook phase or host integrations.
 
 ## Delivery and actions
 
@@ -179,9 +291,10 @@ Providers offer Send Test Email with a recipient input and a reported outcome.
 
 `email_send_templated` is a hidden backend API process. Inputs include `templateName`,
 `to`, `cc`, `bcc`, `replyTo`, `subject`, `markdownBody`, `htmlBody`, `textBody`,
-`providerName`, `brandName`, `category`, `variablesJson`, `linkedTableName`,
-`linkedRecordId`, and `idempotencyKey`. Ad-hoc content works now; template/brand/variable
-inputs return REFUSED until part 2. Output includes `messageId`, `status`, and `reasons`.
+`providerName`, `brandName`, `category`, `locale`, `variablesJson`, `recordVariablesJson`,
+`linkedTableName`, `linkedRecordId`, and `idempotencyKey`. `variablesJson` is an object;
+record bindings use `{"patient":{"table":"patient","id":123}}` in
+`recordVariablesJson`. Output includes `messageId`, `status`, and `reasons`.
 
 Hidden schedules are `email_dispatch` (15 s by default), `email_maintain` (300 s, lease
 recovery including disabled providers, and health probes), and `email_retention`
@@ -206,6 +319,18 @@ The bridge recursively maps Party/MultiParty TO, CC, BCC, FROM and REPLY_TO role
 TEXT/HTML alternatives. REFUSED throws `QException`; successful calls acknowledge
 queueing, not delivery. The built-in EMAIL and SES types are unchanged.
 
+For schema-aware core bridge calls, use the typed extension:
+
+```java
+new SendMessageAction().execute(new EmailTemplatedMessageInput()
+   .withEmailRequest(new EmailRequest().withTemplateName("email_secure_message")
+      .withTo("pat@example.com").withVariable("link", "https://app.example.com/inbox"))
+   .withMessagingProviderName("qbitEmail"));
+```
+
+Ordinary core `SendMessageInput` remains ad-hoc and cannot infer classifications
+from arbitrary pre-rendered text. Use the typed extension for classified variables.
+
 ## Configuration
 
 All settings have fluent `withX` setters and getters.
@@ -214,7 +339,9 @@ All settings have fluent `withX` setters and getters.
 |---|---|
 | `backendName` | Required existing backend |
 | `schedulerName` | Optional existing scheduler; required for automatic dispatch |
-| `publicBaseUrl` | Reserved for later unsubscribe links |
+| `publicBaseUrl` | Public app URL for signed unsubscribe links |
+| `mjmlCompiler` | Optional `MjmlCompilerInterface`; required for MJML activation |
+| `classificationOverrides` | Map of `table.field` to `EmailClassifications.Level` for RC.5 |
 | `defaultProviderName` | Optional named provider override; otherwise enabled default row |
 | `bridgeProviderName` | `qbitEmail` |
 | `secretResolver`, `allowedEnvNames` | `System::getenv`, empty additional allowlist |
@@ -240,7 +367,8 @@ modules to these declarations.
 Windows can use `./mvnw.cmd -o -q verify`. No new dependencies are required. Tests use
 H2, GreenMail and a fake SES client, including transaction rollback, concurrent claims,
 concurrent idempotency, shared rate budgets, health recovery and process screens.
-See [implementation notes](docs/PART1-NOTES.md) for design/API accommodations.
+The tests also exercise template lifecycle, parent-scoped possible values, rendering,
+PHI canary egress, encryption, preview widgets and home data.
 
 ## License
 

@@ -39,6 +39,8 @@ import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
  *******************************************************************************/
 public class EmailQBitConfig implements QBitConfig
 {
+   private com.kingsrook.qbits.email.template.MjmlCompilerInterface mjmlCompiler;
+   private java.util.Map<String, com.kingsrook.qbits.email.phi.EmailClassifications.Level> classificationOverrides = java.util.Map.of();
    private String backendName;
    private String schedulerName;
    private String publicBaseUrl;
@@ -490,6 +492,40 @@ public class EmailQBitConfig implements QBitConfig
    public EmailQBitConfig withTableMetaDataCustomizer(MetaDataCustomizerInterface<QTableMetaData> tableMetaDataCustomizer)
    {
       this.tableMetaDataCustomizer = tableMetaDataCustomizer;
+      return (this);
+   }
+
+   /*******************************************************************************
+    ** Activation-time compiler, optional unless MJML templates are used.
+    *******************************************************************************/
+   public com.kingsrook.qbits.email.template.MjmlCompilerInterface getMjmlCompiler()
+   {
+      return (mjmlCompiler);
+   }
+
+   /*******************************************************************************
+    ** Configure a compiler without introducing a runtime dependency.
+    *******************************************************************************/
+   public EmailQBitConfig withMjmlCompiler(com.kingsrook.qbits.email.template.MjmlCompilerInterface compiler)
+   {
+      mjmlCompiler = compiler;
+      return (this);
+   }
+
+   /*******************************************************************************
+    ** Field classifications used until core supplies classification metadata.
+    *******************************************************************************/
+   public java.util.Map<String, com.kingsrook.qbits.email.phi.EmailClassifications.Level> getClassificationOverrides()
+   {
+      return (classificationOverrides);
+   }
+
+   /*******************************************************************************
+    ** Configure explicit table.field classifications.
+    *******************************************************************************/
+   public EmailQBitConfig withClassificationOverrides(java.util.Map<String, com.kingsrook.qbits.email.phi.EmailClassifications.Level> overrides)
+   {
+      classificationOverrides = java.util.Map.copyOf(overrides);
       return (this);
    }
 }

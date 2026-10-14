@@ -281,6 +281,8 @@ class EmailDeliveryTest
    @Test
    void suppressionScopeCategoryExpiryAndPartial() throws Exception
    {
+      EmailRuntime.config().withPublicBaseUrl("https://app.example.com").withSecretResolver(name -> "test-unsubscribe-key");
+      H2Support.insert(EmailTables.BRAND, new QRecord().withValue("name", "postal").withValue("isDefault", true).withValue("postalAddress", "123 Test Street"));
       H2Support.insert(
             EmailTables.SUPPRESSION,
             new QRecord()
