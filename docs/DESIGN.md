@@ -221,6 +221,7 @@ transient; other 4xx are permanent.
 | variables_snapshot | JSON, redacted per section 7.3 |
 | html_body, text_body | rendered at queue time so retries send the same bytes; encrypted for `phi_approved`; cleared after `bodyRetentionDays` (default 30) once final, keeping `body_sha256` |
 | idempotency_key | unique when present |
+| rfc_message_id | STRING(500), unique; stored once at enqueue and reused on every attempt; see [durable job effects](DURABLE-JOBS.md) |
 | provider_id, provider_message_id | |
 | attempt_count, next_attempt_date, lease_expires_date, last_error, sent_date, delivered_date, dead_letter_date | |
 | linked_table_name, linked_record_id | rendered as a link on the record screen |

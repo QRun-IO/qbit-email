@@ -47,8 +47,15 @@ import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.sesv2.SesV2Client;
-import software.amazon.awssdk.services.sesv2.model.*;
-import static org.assertj.core.api.Assertions.*;
+import software.amazon.awssdk.services.sesv2.model.Message;
+import software.amazon.awssdk.services.sesv2.model.MessageRejectedException;
+import software.amazon.awssdk.services.sesv2.model.SendEmailRequest;
+import software.amazon.awssdk.services.sesv2.model.SendEmailResponse;
+import software.amazon.awssdk.services.sesv2.model.SesV2Exception;
+import software.amazon.awssdk.services.sesv2.model.TooManyRequestsException;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.fail;
 
 /*******************************************************************************
  ** Email Transports Test.
@@ -61,7 +68,7 @@ class EmailTransportsTest
    EmailEnvelope envelope()
    {
       return (new EmailEnvelope()
-            .withMessageId("123")
+            .withMessageId("123").withRfcMessageId("<0123456789abcdef0123456789abcdef@example.com>")
             .withFrom("sender@example.com")
             .withTo(List.of("a@example.com"))
             .withBcc(List.of("hidden@example.com"))
@@ -135,8 +142,24 @@ class EmailTransportsTest
                   Session.getInstance(new Properties()),
                   new ByteArrayInputStream(captured.get().content().raw().data().asByteArray()));
       assertThat(mime.getHeader("Bcc")).isNull();
+      assertThat(mime.getMessageID()).isEqualTo(envelope().getRfcMessageId());
+      assertThat(mime.getHeader("X-QQQ-Email-Id")).containsExactly("123");
       assertThat(mime.getHeader("X-Test")).containsExactly("yes");
       assertThat(mime.getHeader("Auto-Submitted")).containsExactly("auto-generated");
+   }
+
+   /*******************************************************************************
+    ** Repeated JavaMail saves cannot replace the identity or accept a custom override.
+    *******************************************************************************/
+   @Test
+   void mimeIdentitySurvivesSaveChanges() throws Exception
+   {
+      var envelope = envelope().withHeaders(Map.of("message-id", "<override@example.com>"));
+      var message = EmailMime.build(Session.getInstance(new Properties()), envelope);
+      message.saveChanges();
+      message.saveChanges();
+      assertThat(message.getHeader("Message-ID")).containsExactly(envelope.getRfcMessageId());
+      assertThat(EmailMime.build(Session.getInstance(new Properties()), envelope().withRfcMessageId(null)).getMessageID()).isNotBlank();
    }
 
    /*******************************************************************************
@@ -150,7 +173,7 @@ class EmailTransportsTest
                   TooManyRequestsException.builder().statusCode(429).message("secret").build(),
                   MessageRejectedException.builder().statusCode(400).message("secret").build(),
                   SesV2Exception.builder().statusCode(503).message("secret").build()))
-                  {
+      {
          var transport =
                new SesEmailTransport(
                      builder ->
@@ -313,7 +336,7 @@ class EmailTransportsTest
       for(String newline : List.of("\r", "\n"))
       {
          String bad = "a@example.com" + newline + "Bcc: hidden@example.com";
-         for(EmailEnvelope envelope : List.of(envelope().withSubject(bad), envelope().withFrom(bad), envelope().withReplyTo(bad),
+         for(EmailEnvelope envelope : List.of(envelope().withRfcMessageId(bad), envelope().withSubject(bad), envelope().withFrom(bad), envelope().withReplyTo(bad),
             envelope().withTo(List.of(bad)), envelope().withCc(List.of(bad)), envelope().withBcc(List.of(bad)),
             envelope().withHeaders(Map.of("X-Test", bad)), envelope().withFrom("broken <")))
          {

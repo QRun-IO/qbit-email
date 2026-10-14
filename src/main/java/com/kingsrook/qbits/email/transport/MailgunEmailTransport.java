@@ -96,6 +96,10 @@ public class MailgunEmailTransport implements EmailTransport
          field(body, boundary, "o:tracking-opens", settings.enabled("trackOpens") ? "yes" : "no");
          field(body, boundary, "o:tracking-clicks", settings.enabled("trackClicks") ? "yes" : "no");
          field(body, boundary, "v:qqq_email_id", envelope.getMessageId());
+         if(envelope.getRfcMessageId() != null)
+         {
+            field(body, boundary, "h:Message-Id", envelope.getRfcMessageId());
+         }
          body.writeBytes(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"message\"; filename=\"message.eml\"\r\n"
             + "Content-Type: message/rfc822\r\n\r\n").getBytes(StandardCharsets.UTF_8));
          EmailMime.build(Session.getInstance(new Properties()), envelope).writeTo(body, new String[] {"Bcc"});

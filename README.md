@@ -569,6 +569,26 @@ concurrent idempotency, shared rate budgets, health recovery and process screens
 The tests also exercise template lifecycle, parent-scoped possible values, rendering,
 PHI canary egress, encryption, preview widgets and home data.
 
+## Durable jobs
+
+`EmailEffects.send(request, effectIdempotencyKey)` hands a message to the committed
+email outbox exactly once per key and returns an `EmailEffects.Result` containing
+`EmailEffectOutcome` and an `EmailMessageRef`. `QUEUED_OR_DUPLICATE` means the outbox
+accepted responsibility; `REFUSED` means a definite refusal, including suppression.
+Use `findByIdempotencyKey` or `findByRfcMessageId` to reconcile a handoff. These are
+trusted system reads returning only references. Database failures propagate.
+Requests must not carry a caller transaction; the effect dispatcher calls after its
+own chunk commit. Existing `EmailService` transaction support is unchanged.
+
+Each new message stores a unique `rfcMessageId` once. SMTP (including the Gmail preset),
+Postmark, SendGrid and Mailgun carry it on every attempt. SES receives it in the raw
+request but replaces it downstream; every transport retains `X-QQQ-Email-Id`.
+Message-ID enables correlation and receiver deduplication where supported; it does
+not promise exactly-once inbox delivery.
+
+See [the handoff contract, provider references, schema upgrade and RC.7 binding sketch](docs/DURABLE-JOBS.md).
+The build remains on released QQQ **4.1.0-RC.5**, without durable-jobs dependencies.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

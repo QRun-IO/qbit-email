@@ -47,8 +47,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
-import static com.kingsrook.qbits.email.tracking.TrackingTestSupport.*;
-import static org.assertj.core.api.Assertions.*;
+import static com.kingsrook.qbits.email.tracking.TrackingTestSupport.NOW;
+import static com.kingsrook.qbits.email.tracking.TrackingTestSupport.SECRET;
+import static com.kingsrook.qbits.email.tracking.TrackingTestSupport.message;
+import static com.kingsrook.qbits.email.tracking.TrackingTestSupport.provider;
+import static com.kingsrook.qbits.email.tracking.TrackingTestSupport.resource;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /*******************************************************************************
  ** Durable processing, rollback, suppression and race acceptance on real H2.
@@ -422,6 +426,7 @@ class EmailInboxProcessorTest
       /*******************************************************************************
        ** Test adapter implementation.
        *******************************************************************************/
+
       @Override
       public void raise(com.kingsrook.qqq.backend.core.alerts.AlertSignal signal)
       {
