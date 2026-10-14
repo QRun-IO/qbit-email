@@ -1,0 +1,23 @@
+{
+  "signature": {
+    "timestamp": "1791892800",
+    "token": "test-mailgun-nonce",
+    "signature": "signed-in-test"
+  },
+  "event-data": {
+    "id": "mailgun-event-1",
+    "event": "failed",
+    "severity": "permanent",
+    "timestamp": 1791892800,
+    "recipient": "recipient@example.com",
+    "message": {
+      "headers": {
+        "message-id": "<provider-message-1>"
+      }
+    },
+    "delivery-status": {
+      "message": "550 recipient@example.com unavailable"
+    },
+    "user-variables": {}
+  }
+}

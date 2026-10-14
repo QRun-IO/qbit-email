@@ -73,7 +73,7 @@ class EmailMetadataTest
    void producerStandardsAndIntegrationFields() throws Exception
    {
       var instance = QContext.getQInstance();
-      assertThat(instance.getTables()).hasSize(7);
+      assertThat(instance.getTables()).hasSize(9);
       for(var table : instance.getTables().values())
       {
          assertThat(table.getName()).matches("email_[a-z_]+");
@@ -495,8 +495,8 @@ class EmailMetadataTest
       config.validate(QContext.getQInstance(), errors);
       assertThat(errors).isEmpty();
       var scheduled = EmailProcesses.processes(config).stream().filter(p -> p.getSchedule() != null).toList();
-      assertThat(scheduled).hasSize(3).allMatch(p -> p.getIsHidden());
-      assertThat(scheduled).extracting(p -> p.getSchedule().getRepeatSeconds()).containsExactly(15, 300, 86400);
+      assertThat(scheduled).hasSize(4).allMatch(p -> p.getIsHidden());
+      assertThat(scheduled).extracting(p -> p.getSchedule().getRepeatSeconds()).containsExactly(30, 15, 300, 86400);
    }
 
 }

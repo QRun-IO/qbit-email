@@ -30,10 +30,10 @@ import java.time.Duration;
 
 
 /*******************************************************************************
- ** Package-visible HTTP seam; no provider SDK, credential cache or filesystem.
+ ** Shared HTTP seam; no provider SDK, credential cache or filesystem.
  *******************************************************************************/
 @FunctionalInterface
-interface EmailHttp
+public interface EmailHttp
 {
    /*******************************************************************************
     ** Exchange one request without retries.

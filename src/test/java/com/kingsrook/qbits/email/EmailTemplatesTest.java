@@ -220,6 +220,11 @@ class EmailTemplatesTest
       SystemWrites.insertOne(EmailTables.ATTEMPT, new QRecord().withValue("messageId", 1).withValue("providerId", 1).withValue("attemptNumber", 1)
          .withValue("outcome", "SUCCEEDED").withValue("startDate", now.minusSeconds(10)).withValue("endDate", now));
       H2Support.insert(EmailTables.SUPPRESSION, new QRecord().withValue("address", "x@example.com").withValue("scope", "ALL").withValue("reason", "MANUAL"));
+      for(String type : List.of("DELIVERED", "BOUNCED", "COMPLAINED"))
+      {
+         SystemWrites.insertOne(EmailTables.EVENT, new QRecord().withValue("messageId", 1).withValue("eventType", type).withValue("eventKey", type)
+            .withValue("occurredDate", "DELIVERED".equals(type) ? now : now.minusSeconds(("BOUNCED".equals(type) ? 2 : 8) * 86400)));
+      }
       assertThat(EmailHome.overview().getHtml()).contains("1 in 24h · 1 in 7d", "0 in 24h · 1 in 7d", "0 in 24h · 0 in 7d");
       assertThat(EmailHome.hourly().getChartData().getDatasets().getFirst().getData()).contains(1);
       assertThat(EmailHome.suppressions().getChartData().getDatasets().get(3).getData()).contains(1);

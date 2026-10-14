@@ -191,6 +191,24 @@ public class EmailQBitProducer implements QBitMetaDataProducer<EmailQBitConfig>
       output.add(EmailApp.app(qBitConfig, tables));
       output.add(new EmailOutboxMessagingProviderMetaData().withName(qBitConfig.getBridgeProviderName()));
       output.addSelfToInstance(qInstance);
+      registerWebhooks(qInstance);
       return (new MetaDataProducerMultiOutput());
+   }
+
+   /*******************************************************************************
+    ** Keep optional provided middleware linkage outside non-web applications.
+    *******************************************************************************/
+   private static void registerWebhooks(QInstance instance) throws QException
+   {
+      try
+      {
+         Class.forName("io.javalin.Javalin");
+         Class.forName("com.kingsrook.qqq.middleware.javalin.QJavalinMetaData");
+      }
+      catch(ClassNotFoundException e)
+      {
+         return;
+      }
+      com.kingsrook.qbits.email.webhook.EmailWebhookRouteProvider.register(instance);
    }
 }

@@ -214,9 +214,14 @@ public final class EmailService
       }
       boolean allSuppressed = to.isEmpty() && cc.isEmpty() && bcc.isEmpty();
       EmailRenderer.Rendered rendered;
+      QRecord adHocBrand = null;
       try
       {
          rendered = templateContent == null ? renderer.render(request) : new EmailRenderer.Rendered(templateContent.getValueString("htmlBody"), templateContent.getValueString("textBody"));
+         if(templateContent == null)
+         {
+            adHocBrand = com.kingsrook.qbits.email.render.EmailBrands.resolve(request.getBrandName(), null);
+         }
       }
       catch(IllegalArgumentException e)
       {
@@ -228,6 +233,7 @@ public final class EmailService
          .withValue("toAddresses", String.join(",", to)).withValue("ccAddresses", String.join(",", cc)).withValue("bccAddresses", String.join(",", bcc))
          .withValue("fromAddress", from).withValue("replyTo", replyTo).withValue("subject", request.getSubject())
          .withValue("htmlBody", rendered.html()).withValue("textBody", rendered.text()).withValue("bodySha256", digest(rendered))
+         .withValue("brandId", adHocBrand == null ? null : adHocBrand.getValue("id"))
          .withValue("category", category.name()).withValue("locale", request.getLocale()).withValue("idempotencyKey", request.getIdempotencyKey())
          .withValue("linkedTableName", request.getLinkedTableName()).withValue("linkedRecordId", request.getLinkedRecordId())
          .withValue("senderQbit", request.getSenderQbit()).withValue("senderProcess", request.getSenderProcess())

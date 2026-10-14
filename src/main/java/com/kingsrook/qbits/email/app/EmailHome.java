@@ -72,8 +72,16 @@ public final class EmailHome
       String[] fields = {"sentDate", "deliveredDate", "deadLetterDate", "bouncedDate", "complainedDate"};
       for(int i = 0; i < statuses.length; i++)
       {
-         int day = count(EmailTables.MESSAGE, since(fields[i], now.minus(1, ChronoUnit.DAYS)));
-         int week = count(EmailTables.MESSAGE, since(fields[i], now.minus(7, ChronoUnit.DAYS)));
+         boolean events = List.of("DELIVERED", "BOUNCED", "COMPLAINED").contains(statuses[i]);
+         QQueryFilter dayFilter = since(events ? "occurredDate" : fields[i], now.minus(1, ChronoUnit.DAYS));
+         QQueryFilter weekFilter = since(events ? "occurredDate" : fields[i], now.minus(7, ChronoUnit.DAYS));
+         if(events)
+         {
+            dayFilter.withCriteria("eventType", QCriteriaOperator.EQUALS, statuses[i]);
+            weekFilter.withCriteria("eventType", QCriteriaOperator.EQUALS, statuses[i]);
+         }
+         int day = count(events ? EmailTables.EVENT : EmailTables.MESSAGE, dayFilter);
+         int week = count(events ? EmailTables.EVENT : EmailTables.MESSAGE, weekFilter);
          html.append(card(statuses[i].replace('_', ' '), day + " in 24h · " + week + " in 7d"));
       }
       html.append("</div><h3>Recent messages</h3><div style=\"").append(GRID).append("\">");

@@ -33,7 +33,7 @@ import com.kingsrook.qbits.email.template.VariableSchema;
 
 
 /*******************************************************************************
- ** Queue-time link signing from DESIGN 8.2. The receiving route is phase (c).
+ ** Queue-time link signing and verification from DESIGN 8.2.
  *******************************************************************************/
 public final class EmailUnsubscribeLinks
 {
@@ -73,11 +73,45 @@ public final class EmailUnsubscribeLinks
          mac.init(new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
          String signed = "v1." + payload;
          String signature = Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(signed.getBytes(StandardCharsets.UTF_8)));
-         return (base.replaceAll("/+$", "") + "/qqq/hooks/email/unsubscribe/" + signed + "." + signature);
+         return (base.replaceAll("/+$", "") + EmailRuntime.config().getWebhookBasePath() + "/unsubscribe/" + signed + "." + signature);
       }
       catch(Exception e)
       {
          throw (new IllegalArgumentException("Opt-out email needs publicBaseUrl and QQQ_EMAIL_UNSUBSCRIBE_KEY"));
+      }
+   }
+
+   /*******************************************************************************
+    ** Verify the existing envelope-bound format before any lookup or side effect.
+    ** Invalid and non-opt-out categories are indistinguishable to callers.
+    *******************************************************************************/
+   public static org.json.JSONObject verify(String token)
+   {
+      try
+      {
+         if(token == null || token.length() > 4096)
+         {
+            return (null);
+         }
+         String[] parts = token.split("\\.", -1);
+         String key = EmailRuntime.config().getSecretResolver().apply("QQQ_EMAIL_UNSUBSCRIBE_KEY");
+         if(parts.length != 3 || !"v1".equals(parts[0]) || key == null || key.isBlank())
+         {
+            return (null);
+         }
+         Mac mac = Mac.getInstance("HmacSHA256");
+         mac.init(new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+         if(!MessageDigest.isEqual(mac.doFinal((parts[0] + "." + parts[1]).getBytes(StandardCharsets.UTF_8)), Base64.getUrlDecoder().decode(parts[2])))
+         {
+            return (null);
+         }
+         var payload = new org.json.JSONObject(new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8));
+         String category = payload.getString("category");
+         return (("MARKETING".equals(category) || "NOTIFICATION".equals(category)) ? payload : null);
+      }
+      catch(Exception e)
+      {
+         return (null);
       }
    }
 }

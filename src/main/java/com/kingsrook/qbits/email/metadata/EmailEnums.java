@@ -312,4 +312,88 @@ public final class EmailEnums
          return (name().charAt(0) + name().substring(1).toLowerCase(java.util.Locale.ROOT).replace('_', ' '));
       }
    }
+
+
+
+   /*******************************************************************************
+    ** InboxStatus values.
+    *******************************************************************************/
+   public enum InboxStatus implements PossibleValueEnum<String>
+   {
+      PENDING, PROCESSED, FAILED, IGNORED;
+
+      /*******************************************************************************
+       ** Stable stored identifier.
+       *******************************************************************************/
+      @Override
+      public String getPossibleValueId()
+      {
+         return (name());
+      }
+
+      /*******************************************************************************
+       ** Display label.
+       *******************************************************************************/
+      @Override
+      public String getPossibleValueLabel()
+      {
+         return (name().charAt(0) + name().substring(1).toLowerCase(java.util.Locale.ROOT).replace('_', ' '));
+      }
+   }
+
+
+
+   /*******************************************************************************
+    ** EventType values.
+    *******************************************************************************/
+   public enum EventType implements PossibleValueEnum<String>
+   {
+      DELIVERED, DEFERRED, BOUNCED, COMPLAINED, OPENED, CLICKED, UNSUBSCRIBED, REJECTED;
+
+      /*******************************************************************************
+       ** Stable stored identifier.
+       *******************************************************************************/
+      @Override
+      public String getPossibleValueId()
+      {
+         return (name());
+      }
+
+      /*******************************************************************************
+       ** Display label.
+       *******************************************************************************/
+      @Override
+      public String getPossibleValueLabel()
+      {
+         return (name().charAt(0) + name().substring(1).toLowerCase(java.util.Locale.ROOT).replace('_', ' '));
+      }
+   }
+
+
+
+   /*******************************************************************************
+    ** BounceType values.
+    *******************************************************************************/
+   public enum BounceType implements PossibleValueEnum<String>
+   {
+      HARD, SOFT, UNDETERMINED;
+
+      /*******************************************************************************
+       ** Stable stored identifier.
+       *******************************************************************************/
+      @Override
+      public String getPossibleValueId()
+      {
+         return (name());
+      }
+
+      /*******************************************************************************
+       ** Display label.
+       *******************************************************************************/
+      @Override
+      public String getPossibleValueLabel()
+      {
+         return (name().charAt(0) + name().substring(1).toLowerCase(java.util.Locale.ROOT).replace('_', ' '));
+      }
+   }
 }
