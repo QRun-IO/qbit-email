@@ -344,7 +344,8 @@ public final class EmailTables
          .withField(field("phiApprovedBy", QFieldType.STRING).withMaxLength(500).withIsEditable(false))
          .withField(field("phiApprovedDate", QFieldType.DATE_TIME).withIsEditable(false))
          .withField(field("editPermissionName", QFieldType.STRING).withMaxLength(500))
-         .withField(field("ownerQbit", QFieldType.STRING).withMaxLength(500))
+         .withField(field("ownerQbit", QFieldType.STRING).withMaxLength(500).withIsEditable(false)
+            .withHelpContent(new com.kingsrook.qqq.backend.core.model.metadata.help.QHelpContent("Set by the qbit that registered the template. Messages sent from it name that qbit as their sender unless the sender says otherwise.")))
          .withField(field("description", QFieldType.TEXT));
       table.withRecordLabelFormatAndFields("%s", "name");
       table.withUniqueKey(new UniqueKey("name"));
