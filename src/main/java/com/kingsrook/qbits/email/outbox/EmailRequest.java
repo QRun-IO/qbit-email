@@ -39,6 +39,7 @@ public class EmailRequest
    private List<String> cc = new ArrayList<>();
    private List<String> bcc = new ArrayList<>();
    private String from;
+   private Integer fromAddressId;
    private String replyTo;
    private String subject;
    private String markdownBody;
@@ -209,6 +210,26 @@ public class EmailRequest
    public EmailRequest withFrom(String from)
    {
       this.from = from;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Getter for fromAddressId.
+    *******************************************************************************/
+   public Integer getFromAddressId()
+   {
+      return (fromAddressId);
+   }
+
+
+   /*******************************************************************************
+    ** Fluent setter for fromAddressId, a row of email_provider_sender_address that
+    ** must belong to the resolved provider and be enabled.
+    *******************************************************************************/
+   public EmailRequest withFromAddressId(Integer fromAddressId)
+   {
+      this.fromAddressId = fromAddressId;
       return (this);
    }
 

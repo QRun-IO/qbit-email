@@ -26,6 +26,7 @@ import java.util.List;
 import com.kingsrook.qbits.email.EmailQBitConfig;
 import com.kingsrook.qbits.email.outbox.EmailCategory;
 import com.kingsrook.qbits.email.permissions.EmailPermissionChecker;
+import com.kingsrook.qbits.email.support.EmailStore;
 import com.kingsrook.qqq.backend.core.actions.dashboard.widgets.ChildRecordListRenderer;
 import com.kingsrook.qqq.backend.core.instances.QInstanceEnricher;
 import com.kingsrook.qqq.backend.core.model.metadata.code.QCodeReference;
@@ -53,6 +54,7 @@ import com.kingsrook.qqq.backend.core.model.metadata.tables.UniqueKey;
 public final class EmailTables
 {
    public static final String PROVIDER = "email_provider";
+   public static final String SENDER = "email_provider_sender_address";
    public static final String MESSAGE = "email_message";
    public static final String ATTEMPT = "email_message_attempt";
    public static final String TEMPLATE = "email_template";
@@ -61,7 +63,7 @@ public final class EmailTables
    public static final String SUPPRESSION = "email_suppression";
    public static final String INBOX = "email_webhook_inbox";
    public static final String EVENT = "email_event";
-   public static final List<String> ALL = List.of(PROVIDER, MESSAGE, ATTEMPT, TEMPLATE, VERSION, BRAND, SUPPRESSION, INBOX, EVENT);
+   public static final List<String> ALL = List.of(PROVIDER, SENDER, MESSAGE, ATTEMPT, TEMPLATE, VERSION, BRAND, SUPPRESSION, INBOX, EVENT);
    public static final List<String> MAIN = List.of(MESSAGE, TEMPLATE, BRAND, SUPPRESSION, PROVIDER);
    public static final List<String> SYSTEM_WRITTEN = List.of(MESSAGE, ATTEMPT, INBOX, EVENT);
 
@@ -103,9 +105,10 @@ public final class EmailTables
       ALL.forEach(name -> result.add(QPossibleValueSource.newForTable(name)));
       for(QPossibleValueSource source : result)
       {
-         if(List.of(PROVIDER, MESSAGE, VERSION).contains(source.getName()))
+         if(List.of(PROVIDER, SENDER, MESSAGE, VERSION).contains(source.getName()))
          {
-            source.withSearchFields(PROVIDER.equals(source.getName()) ? List.of("label", "name") : MESSAGE.equals(source.getName()) ? List.of("subject") : List.of("versionNumber", "locale"))
+            source.withSearchFields(PROVIDER.equals(source.getName()) ? List.of("label", "name") : SENDER.equals(source.getName()) ? List.of("address", "displayName")
+               : MESSAGE.equals(source.getName()) ? List.of("subject") : List.of("versionNumber", "locale"))
                .withOrderByField("id");
          }
       }
@@ -119,6 +122,7 @@ public final class EmailTables
    {
       List<QTableMetaData> tables = new ArrayList<>();
       tables.add(provider(config));
+      tables.add(sender(config));
       tables.add(message(config));
       tables.add(messageattempt(config));
       tables.add(template(config));
@@ -210,8 +214,31 @@ public final class EmailTables
       table.withSection(SectionFactory.defaultT1("id", "name", "label", "kind", "enabled", "isDefault"));
       table.withSection(SectionFactory.defaultT2("fromAddress", "fromName", "replyTo", "sendingDomain", "host", "port", "security", "region", "usernameEnvName", "secretEnvName", "webhookSecretEnvName", "snsTopicArn", "configurationSet", "messageStream", "maxPerMinute", "maxPerDay", "trackOpens", "trackClicks", "phiAllowed", "healthStatus", "lastSuccessDate", "lastFailureDate", "lastFailureMessage"));
       table.withSection(SectionFactory.defaultT3("createDate", "modifyDate"));
+      table.withSection(SectionFactory.customT2("senders", new QIcon("list")).withLabel("Sender Addresses").withWidgetName(SENDER + "_children"));
       table.withSection(SectionFactory.customT2("children", new QIcon("list")).withLabel("Messages").withWidgetName(PROVIDER + "_children"));
       table.withSection(SectionFactory.customT2("inbox", new QIcon("list")).withLabel("Webhook Inbox").withWidgetName(INBOX + "_children"));
+      return (table);
+   }
+
+
+   /*******************************************************************************
+    ** Metadata for email_provider_sender_address. The provider list in the
+    ** nav is the only entry point; rows are managed as a child list on the provider.
+    *******************************************************************************/
+   private static QTableMetaData sender(EmailQBitConfig config)
+   {
+      QTableMetaData table = base(config, SENDER, "Provider Sender Address")
+         .withField(field("providerId", QFieldType.INTEGER).withPossibleValueSourceName(PROVIDER).withIsRequired(true))
+         .withField(field("address", QFieldType.STRING).withIsRequired(true).withMaxLength(500))
+         .withField(field("displayName", QFieldType.STRING).withMaxLength(500))
+         .withField(field("isDefault", QFieldType.BOOLEAN).withDefaultValue(false))
+         .withField(field("enabled", QFieldType.BOOLEAN).withDefaultValue(true))
+         .withField(field("note", QFieldType.TEXT));
+      table.withRecordLabelFormat(null).withRecordLabelFields(List.of());
+      table.withUniqueKey(new UniqueKey("providerId", "address"));
+      table.withSection(SectionFactory.defaultT1("id", "providerId", "address", "displayName", "isDefault", "enabled"));
+      table.withSection(SectionFactory.defaultT2("note"));
+      table.withSection(SectionFactory.defaultT3("createDate", "modifyDate"));
       return (table);
    }
 
@@ -227,10 +254,11 @@ public final class EmailTables
          .withField(field("ccAddresses", QFieldType.TEXT).withIsSensitive(true))
          .withField(field("bccAddresses", QFieldType.TEXT).withIsSensitive(true))
          .withField(field("fromAddress", QFieldType.STRING).withIsSensitive(true).withMaxLength(500))
+         .withField(field("fromAddressId", QFieldType.INTEGER).withPossibleValueSourceName(SENDER).withPossibleValueSourceFilter(EmailStore.equal("providerId", "${input.providerId}")))
          .withField(field("replyTo", QFieldType.STRING).withIsSensitive(true).withMaxLength(500))
          .withField(field("subject", QFieldType.TEXT).withIsSensitive(true))
          .withField(field("templateId", QFieldType.INTEGER).withPossibleValueSourceName(TEMPLATE))
-         .withField(field("templateVersionId", QFieldType.INTEGER).withPossibleValueSourceName(VERSION).withPossibleValueSourceFilter(com.kingsrook.qbits.email.support.EmailStore.equal("templateId", "${input.templateId}")))
+         .withField(field("templateVersionId", QFieldType.INTEGER).withPossibleValueSourceName(VERSION).withPossibleValueSourceFilter(EmailStore.equal("templateId", "${input.templateId}")))
          .withField(field("brandId", QFieldType.INTEGER).withPossibleValueSourceName(BRAND))
          .withField(field("category", QFieldType.STRING).withPossibleValueSourceName("email_category").withMaxLength(500))
          .withField(field("locale", QFieldType.STRING).withDefaultValue("en").withMaxLength(500))
@@ -264,7 +292,7 @@ public final class EmailTables
       table.getField("subject").setIsHeavy(false);
       table.withUniqueKey(new UniqueKey("idempotencyKey"));
       table.withSection(SectionFactory.defaultT1("id", "status", "toAddresses", "ccAddresses", "bccAddresses", "fromAddress"));
-      table.withSection(SectionFactory.defaultT2("replyTo", "subject", "templateId", "templateVersionId", "brandId", "category", "locale", "variablesSnapshot", "htmlBody", "textBody", "phiApproved", "unsubscribeUrl", "bodySha256", "idempotencyKey", "providerId", "providerMessageId", "attemptCount", "nextAttemptDate", "leaseExpiresDate", "lastError", "finishedDate", "sentDate", "deliveredDate", "bouncedDate", "complainedDate", "deadLetterDate", "linkedTableName", "linkedRecordId", "senderQbit", "senderProcess", "suppressedAddresses", "sendAfter"));
+      table.withSection(SectionFactory.defaultT2("fromAddressId", "replyTo", "subject", "templateId", "templateVersionId", "brandId", "category", "locale", "variablesSnapshot", "htmlBody", "textBody", "phiApproved", "unsubscribeUrl", "bodySha256", "idempotencyKey", "providerId", "providerMessageId", "attemptCount", "nextAttemptDate", "leaseExpiresDate", "lastError", "finishedDate", "sentDate", "deliveredDate", "bouncedDate", "complainedDate", "deadLetterDate", "linkedTableName", "linkedRecordId", "senderQbit", "senderProcess", "suppressedAddresses", "sendAfter"));
       table.withSection(SectionFactory.defaultT3("createDate", "modifyDate"));
       table.withSection(SectionFactory.customT2("children", new QIcon("list")).withLabel("Attempts").withWidgetName(MESSAGE + "_children"));
       table.withSection(SectionFactory.customT2("events", new QIcon("list")).withLabel("Events").withWidgetName(EVENT + "_children"));
@@ -278,7 +306,7 @@ public final class EmailTables
    private static QTableMetaData messageattempt(EmailQBitConfig config)
    {
       QTableMetaData table = base(config, ATTEMPT, "Message Attempt")
-         .withField(field("messageId", QFieldType.INTEGER).withPossibleValueSourceName(MESSAGE).withIsRequired(true))
+         .withField(field("messageId", QFieldType.INTEGER).withPossibleValueSourceName(MESSAGE).withIsRequired(true).withPossibleValueSourceFilter(EmailStore.equal("providerId", "${input.providerId}")))
          .withField(field("attemptNumber", QFieldType.INTEGER).withIsRequired(true))
          .withField(field("outcome", QFieldType.STRING).withPossibleValueSourceName("email_attempt_outcome").withMaxLength(500))
          .withField(field("providerId", QFieldType.INTEGER).withPossibleValueSourceName(PROVIDER))
@@ -307,8 +335,8 @@ public final class EmailTables
          .withField(field("category", QFieldType.STRING).withPossibleValueSourceName("email_category").withMaxLength(500))
          .withField(field("kind", QFieldType.STRING).withPossibleValueSourceName("email_template_kind").withIsRequired(true).withMaxLength(500))
          .withField(field("brandId", QFieldType.INTEGER).withPossibleValueSourceName(BRAND))
-         .withField(field("activeVersionId", QFieldType.INTEGER).withPossibleValueSourceName(VERSION).withIsEditable(false).withPossibleValueSourceFilter(com.kingsrook.qbits.email.support.EmailStore.equal("templateId", "${input.id}")))
-         .withField(field("approvedVersionId", QFieldType.INTEGER).withIsEditable(false).withPossibleValueSourceName(VERSION).withPossibleValueSourceFilter(com.kingsrook.qbits.email.support.EmailStore.equal("templateId", "${input.id}")))
+         .withField(field("activeVersionId", QFieldType.INTEGER).withPossibleValueSourceName(VERSION).withIsEditable(false).withPossibleValueSourceFilter(EmailStore.equal("templateId", "${input.id}")))
+         .withField(field("approvedVersionId", QFieldType.INTEGER).withIsEditable(false).withPossibleValueSourceName(VERSION).withPossibleValueSourceFilter(EmailStore.equal("templateId", "${input.id}")))
          .withField(field("versionLock", QFieldType.INTEGER).withIsHidden(true).withIsEditable(false))
          .withField(field("phiApproved", QFieldType.BOOLEAN).withDefaultValue(false).withIsEditable(false))
          .withField(field("phiApprovedBy", QFieldType.STRING).withMaxLength(500).withIsEditable(false))
@@ -399,7 +427,7 @@ public final class EmailTables
          .withField(field("scope", QFieldType.STRING).withPossibleValueSourceName("email_suppression_scope").withIsRequired(true).withMaxLength(500))
          .withField(field("reason", QFieldType.STRING).withPossibleValueSourceName("email_suppression_reason").withIsRequired(true).withMaxLength(500))
          .withField(field("sourceMessageId", QFieldType.INTEGER))
-         .withField(field("sourceEventId", QFieldType.INTEGER).withPossibleValueSourceName(EVENT))
+         .withField(field("sourceEventId", QFieldType.INTEGER).withPossibleValueSourceName(EVENT).withPossibleValueSourceFilter(EmailStore.equal("messageId", "${input.sourceMessageId}")))
          .withField(field("note", QFieldType.TEXT))
          .withField(field("createdDate", QFieldType.DATE_TIME))
          .withField(field("expiresDate", QFieldType.DATE_TIME));
@@ -442,7 +470,7 @@ public final class EmailTables
    private static QTableMetaData event(EmailQBitConfig config)
    {
       QTableMetaData table = base(config, EVENT, "Event")
-         .withField(field("messageId", QFieldType.INTEGER).withIsRequired(true).withPossibleValueSourceName(MESSAGE))
+         .withField(field("messageId", QFieldType.INTEGER).withIsRequired(true).withPossibleValueSourceName(MESSAGE).withPossibleValueSourceFilter(EmailStore.equal("providerId", "${input.providerId}")))
          .withField(field("providerId", QFieldType.INTEGER).withPossibleValueSourceName(PROVIDER))
          .withField(field("eventType", QFieldType.STRING).withMaxLength(500).withIsRequired(true).withPossibleValueSourceName("email_event_type"))
          .withField(field("bounceType", QFieldType.STRING).withMaxLength(500).withPossibleValueSourceName("email_bounce_type"))
@@ -462,7 +490,7 @@ public final class EmailTables
     *******************************************************************************/
    public static List<QJoinMetaData> joins()
    {
-      return (List.of(join(PROVIDER, MESSAGE, "providerId"), join(MESSAGE, ATTEMPT, "messageId"), join(TEMPLATE, VERSION, "templateId"), join(PROVIDER, INBOX, "providerId"), join(MESSAGE, EVENT, "messageId")));
+      return (List.of(join(PROVIDER, MESSAGE, "providerId"), join(MESSAGE, ATTEMPT, "messageId"), join(TEMPLATE, VERSION, "templateId"), join(PROVIDER, INBOX, "providerId"), join(PROVIDER, SENDER, "providerId"), join(MESSAGE, EVENT, "messageId")));
    }
 
    /*******************************************************************************
@@ -482,8 +510,8 @@ public final class EmailTables
       List<QWidgetMetaData> widgets = new ArrayList<>();
       for(QJoinMetaData join : joins())
       {
-         widgets.add(ChildRecordListRenderer.widgetMetaDataBuilder(join).withName(List.of(INBOX, EVENT).contains(join.getRightTable()) ? join.getRightTable() + "_children" : join.getLeftTable() + "_children")
-            .withLabel(join.getRightTable().equals(INBOX) ? "Webhook Inbox" : join.getRightTable().equals(EVENT) ? "Events" : join.getRightTable().equals(ATTEMPT) ? "Attempts" : join.getRightTable().equals(VERSION) ? "Versions" : "Messages")
+         widgets.add(ChildRecordListRenderer.widgetMetaDataBuilder(join).withName(List.of(INBOX, EVENT, SENDER).contains(join.getRightTable()) ? join.getRightTable() + "_children" : join.getLeftTable() + "_children")
+            .withLabel(join.getRightTable().equals(INBOX) ? "Webhook Inbox" : join.getRightTable().equals(SENDER) ? "Sender Addresses" : join.getRightTable().equals(EVENT) ? "Events" : join.getRightTable().equals(ATTEMPT) ? "Attempts" : join.getRightTable().equals(VERSION) ? "Versions" : "Messages")
             .withMaxRows(50).getWidgetMetaData().withGridColumns(12).withPermissionRules(permissionRules()));
       }
       return (widgets);

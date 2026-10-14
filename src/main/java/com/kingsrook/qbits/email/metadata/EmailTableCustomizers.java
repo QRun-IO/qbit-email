@@ -21,23 +21,32 @@
 package com.kingsrook.qbits.email.metadata;
 
 
+import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import com.kingsrook.qbits.email.EmailQBitConfig;
 import com.kingsrook.qbits.email.EmailRuntime;
 import com.kingsrook.qbits.email.permissions.EmailPermissionChecker;
 import com.kingsrook.qbits.email.permissions.EmailPermissions;
+import com.kingsrook.qbits.email.support.EmailStore;
 import com.kingsrook.qbits.email.support.SystemWrites;
 import com.kingsrook.qbits.email.transport.EmailProviderSettings;
+import com.kingsrook.qqq.backend.core.actions.QBackendTransaction;
 import com.kingsrook.qqq.backend.core.actions.customizers.TableCustomizerInterface;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
 import com.kingsrook.qqq.backend.core.model.actions.AbstractActionInput;
 import com.kingsrook.qqq.backend.core.model.actions.tables.QueryOrGetInputInterface;
 import com.kingsrook.qqq.backend.core.model.actions.tables.delete.DeleteInput;
+import com.kingsrook.qqq.backend.core.model.actions.tables.insert.InsertInput;
+import com.kingsrook.qqq.backend.core.model.actions.tables.query.QCriteriaOperator;
+import com.kingsrook.qqq.backend.core.model.actions.tables.query.QFilterCriteria;
 import com.kingsrook.qqq.backend.core.model.actions.tables.query.QQueryFilter;
+import com.kingsrook.qqq.backend.core.model.actions.tables.update.UpdateInput;
 import com.kingsrook.qqq.backend.core.model.data.QRecord;
 import com.kingsrook.qqq.backend.core.model.statusmessages.BadInputStatusMessage;
 import jakarta.mail.internet.InternetAddress;
@@ -197,6 +206,13 @@ public final class EmailTableCustomizers
                   record.setValue(field, null);
                }
             }
+            String sendingDomain = merged.getValueString("sendingDomain");
+            if(sendingDomain != null && !sendingDomain.isBlank() && merged.getValue("id") != null
+               && SystemWrites.query(EmailTables.SENDER, EmailStore.equal("providerId", merged.getValueInteger("id")), null).stream()
+                  .anyMatch(s -> !sendingDomain.equalsIgnoreCase(s.getValueString("address").substring(s.getValueString("address").lastIndexOf('@') + 1))))
+            {
+               record.addError(new BadInputStatusMessage("Sender addresses must match the sending domain"));
+            }
             resulting.removeIf(r -> Objects.equals(r.getValue("id"), record.getValue("id")));
             resulting.add(merged);
             record.setValue("defaultSlot", Boolean.TRUE.equals(merged.getValueBoolean("enabled")) && Boolean.TRUE.equals(merged.getValueBoolean("isDefault")) ? 1 : null);
@@ -229,6 +245,13 @@ public final class EmailTableCustomizers
             && remaining.stream().noneMatch(r -> Boolean.TRUE.equals(r.getValueBoolean("enabled")) && Boolean.TRUE.equals(r.getValueBoolean("isDefault"))))
          {
             records.forEach(r -> r.addError(new BadInputStatusMessage("Choose another enabled default before deleting this provider")));
+         }
+         for(QRecord row : records)
+         {
+            if(!preview && row.getErrors().isEmpty())
+            {
+               SystemWrites.delete(EmailTables.SENDER, EmailStore.equal("providerId", row.getValueInteger("id")), input.getTransaction());
+            }
          }
          return (records);
       }
@@ -265,6 +288,106 @@ public final class EmailTableCustomizers
                      }
                   }
                   row.setValue(field + "Status", value == null || value.isBlank() ? "Not set" : "Set");
+               }
+            }
+         }
+         return (records);
+      }
+   }
+
+   /*******************************************************************************
+    ** Sender addresses: canonical lowercase address, the provider's sending domain,
+    ** unique per provider and at most one enabled default per provider.
+    *******************************************************************************/
+   public static class SenderAddressCustomizer implements TableCustomizerInterface
+   {
+      /*******************************************************************************
+       ** Validate each row against its provider and the resulting set of rows.
+       *******************************************************************************/
+      @Override
+      public List<QRecord> preInsertOrUpdate(AbstractActionInput input, List<QRecord> records, boolean preview, Optional<List<QRecord>> oldRecords) throws QException
+      {
+         if(SystemWrites.active())
+         {
+            return (records);
+         }
+         QBackendTransaction transaction = input instanceof InsertInput insert ? insert.getTransaction() : input instanceof UpdateInput update ? update.getTransaction() : null;
+         List<QRecord> resulting = new ArrayList<>();
+         Set<Serializable> providerIds = new LinkedHashSet<>();
+         for(QRecord record : records)
+         {
+            QRecord merged = effective(record, oldRecords);
+            if(record.getValueString("address") != null)
+            {
+               try
+               {
+                  String text = record.getValueString("address");
+                  if(text.contains("\r") || text.contains("\n"))
+                  {
+                     throw (new IllegalArgumentException("Sender address must not contain line breaks"));
+                  }
+                  InternetAddress address = new InternetAddress(text, true);
+                  address.validate();
+                  record.setValue("address", address.getAddress().toLowerCase(Locale.ROOT));
+                  merged.setValue("address", record.getValue("address"));
+               }
+               catch(Exception e)
+               {
+                  record.addError(new BadInputStatusMessage("A valid sender address is required"));
+               }
+            }
+            String name = merged.getValueString("displayName");
+            if(name != null && (name.contains("\r") || name.contains("\n")))
+            {
+               record.addError(new BadInputStatusMessage("Display name must not contain line breaks"));
+            }
+            QRecord provider = merged.getValue("providerId") == null ? null : EmailStore.get(EmailTables.PROVIDER, merged.getValueInteger("providerId"), transaction);
+            if(provider == null)
+            {
+               record.addError(new BadInputStatusMessage("An existing provider is required"));
+            }
+            else if(merged.getValueString("address") != null && record.getErrors().isEmpty())
+            {
+               String domain = provider.getValueString("sendingDomain");
+               String address = merged.getValueString("address");
+               if(domain != null && !domain.isBlank() && !domain.equalsIgnoreCase(address.substring(address.lastIndexOf('@') + 1)))
+               {
+                  record.addError(new BadInputStatusMessage("Sender address domain must match the provider sending domain"));
+               }
+            }
+            if(Boolean.TRUE.equals(merged.getValueBoolean("isDefault")) && !Boolean.TRUE.equals(merged.getValueBoolean("enabled")))
+            {
+               record.addError(new BadInputStatusMessage("A default sender address must be enabled"));
+            }
+            if(merged.getValue("providerId") != null)
+            {
+               providerIds.add(merged.getValue("providerId"));
+            }
+            resulting.add(merged);
+         }
+         if(!providerIds.isEmpty())
+         {
+            List<QRecord> existing = SystemWrites.query(EmailTables.SENDER, new QQueryFilter(new QFilterCriteria("providerId", QCriteriaOperator.IN, new ArrayList<>(providerIds))), transaction);
+            existing.removeIf(r -> records.stream().anyMatch(n -> Objects.equals(n.getValue("id"), r.getValue("id"))));
+            for(int i = 0; i < records.size(); i++)
+            {
+               QRecord merged = resulting.get(i);
+               List<QRecord> peers = new ArrayList<>(existing);
+               for(int j = 0; j < resulting.size(); j++)
+               {
+                  if(j != i)
+                  {
+                     peers.add(resulting.get(j));
+                  }
+               }
+               peers.removeIf(r -> !Objects.equals(r.getValue("providerId"), merged.getValue("providerId")));
+               if(peers.stream().anyMatch(r -> Objects.equals(r.getValueString("address"), merged.getValueString("address"))))
+               {
+                  records.get(i).addError(new BadInputStatusMessage("That sender address already exists for this provider"));
+               }
+               if(Boolean.TRUE.equals(merged.getValueBoolean("isDefault")) && peers.stream().anyMatch(r -> Boolean.TRUE.equals(r.getValueBoolean("isDefault"))))
+               {
+                  records.get(i).addError(new BadInputStatusMessage("Only one sender address per provider can be the default"));
                }
             }
          }

@@ -164,16 +164,29 @@ public final class EmailService
       List<String> bcc;
       String from;
       String replyTo;
+      QRecord senderRow;
+      try
+      {
+         senderRow = senderRow(provider, SystemWrites.query(EmailTables.SENDER, EmailStore.equal("providerId", provider.getValue("id")), queryTransaction), request);
+      }
+      catch(IllegalArgumentException e)
+      {
+         return (refused(e.getMessage()));
+      }
       try
       {
          to = addresses(request.getTo());
          cc = addresses(request.getCc());
          bcc = addresses(request.getBcc());
-         String sender = request.getFrom() == null ? provider.getValueString("fromAddress") : request.getFrom();
+         String sender = request.getFrom() != null ? request.getFrom() : senderRow != null ? senderRow.getValueString("address") : provider.getValueString("fromAddress");
          from = single(sender);
-         if(request.getFrom() == null && provider.getValueString("fromName") != null)
+         if(request.getFrom() == null)
          {
-            from = new InternetAddress(new InternetAddress(from).getAddress(), provider.getValueString("fromName"), "UTF-8").toString();
+            String name = senderRow != null ? senderRow.getValueString("displayName") : provider.getValueString("fromName");
+            if(name != null && !name.isBlank())
+            {
+               from = new InternetAddress(new InternetAddress(from).getAddress(), name, "UTF-8").toString();
+            }
          }
          String reply = request.getReplyTo() == null ? provider.getValueString("replyTo") : request.getReplyTo();
          replyTo = reply == null ? null : single(reply);
@@ -244,7 +257,7 @@ public final class EmailService
       QRecord row = new QRecord().withValue("providerId", provider.getValue("id"))
          .withValue("status", allSuppressed ? "SUPPRESSED" : "QUEUED").withValue("finishedDate", allSuppressed ? now : null).withValue("attemptCount", 0)
          .withValue("toAddresses", String.join(",", to)).withValue("ccAddresses", String.join(",", cc)).withValue("bccAddresses", String.join(",", bcc))
-         .withValue("fromAddress", from).withValue("replyTo", replyTo).withValue("subject", request.getSubject())
+         .withValue("fromAddress", from).withValue("fromAddressId", senderRow == null ? null : senderRow.getValue("id")).withValue("replyTo", replyTo).withValue("subject", request.getSubject())
          .withValue("htmlBody", rendered.html()).withValue("textBody", rendered.text()).withValue("bodySha256", digest(rendered))
          .withValue("brandId", adHocBrand == null ? null : adHocBrand.getValue("id"))
          .withValue("category", category.name()).withValue("locale", request.getLocale()).withValue("idempotencyKey", request.getIdempotencyKey())
@@ -304,7 +317,7 @@ public final class EmailService
          return (refused("Provider is unavailable"));
       }
       EmailRequest request = new EmailRequest().withSubject(row.getValueString("subject")).withHtmlBody(row.getValueString("htmlBody"))
-         .withTextBody(row.getValueString("textBody")).withFrom(row.getValueString("fromAddress")).withReplyTo(row.getValueString("replyTo"))
+         .withTextBody(row.getValueString("textBody")).withFrom(row.getValueString("fromAddress")).withFromAddressId(row.getValueInteger("fromAddressId")).withReplyTo(row.getValueString("replyTo"))
          .withProviderName(provider.getValueString("name")).withCategory(EmailCategory.valueOf(row.getValueString("category")))
          .withLinkedRecord(EmailTables.MESSAGE, id).withSender("email", "email_resend");
       if(row.getValueString("toAddresses") != null && !row.getValueString("toAddresses").isBlank())
@@ -477,6 +490,57 @@ public final class EmailService
          }
       }
       return (result);
+   }
+
+   /*******************************************************************************
+    ** The provider sender-address row a request uses, or null for the provider's own
+    ** from address. A chosen id, or a from text, must name an enabled row of this
+    ** provider; once a provider has rows, an explicit from text must match one.
+    ** With neither, an enabled default row wins over the provider's from address.
+    *******************************************************************************/
+   private static QRecord senderRow(QRecord provider, List<QRecord> rows, EmailRequest request)
+   {
+      String refusal = "That from address is not set up for provider " + provider.getValueString("name");
+      String wanted = null;
+      if(request.getFrom() != null && (request.getFromAddressId() != null || !rows.isEmpty()))
+      {
+         try
+         {
+            wanted = new InternetAddress(request.getFrom()).getAddress().toLowerCase(Locale.ROOT);
+         }
+         catch(Exception e)
+         {
+            throw (new IllegalArgumentException("One or more email addresses are invalid"));
+         }
+      }
+      for(QRecord row : rows)
+      {
+         boolean enabled = Boolean.TRUE.equals(row.getValueBoolean("enabled"));
+         if(request.getFromAddressId() != null)
+         {
+            if(request.getFromAddressId().equals(row.getValueInteger("id")))
+            {
+               if(!enabled || wanted != null && !wanted.equals(row.getValueString("address")))
+               {
+                  throw (new IllegalArgumentException(refusal));
+               }
+               return (row);
+            }
+         }
+         else if(wanted != null && enabled && wanted.equals(row.getValueString("address")))
+         {
+            return (row);
+         }
+         else if(request.getFrom() == null && enabled && Boolean.TRUE.equals(row.getValueBoolean("isDefault")))
+         {
+            return (row);
+         }
+      }
+      if(request.getFromAddressId() != null || wanted != null)
+      {
+         throw (new IllegalArgumentException(refusal));
+      }
+      return (null);
    }
 
    /*******************************************************************************

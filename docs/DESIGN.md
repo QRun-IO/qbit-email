@@ -53,6 +53,7 @@ EmailSendResult result = EmailService.send(new EmailRequest()
    .withRecordVariable("order", "order", 1234)     // a record, read as the sender; classification known
    .withCategory(EmailCategory.NOTIFICATION)       // default: the template's
    .withProviderName("pmg")                        // optional; else the default provider
+   .withFromAddressId(4)                           // optional enabled email_provider_sender_address row of that provider
    .withBrandName("kof22")                         // optional; else the template's, else the default brand
    .withIdempotencyKey("alerts:notif:991")         // optional; a repeat returns the existing message
    .withLinkedRecord("alerts_alert", 991)          // shown as a link on the message record
@@ -72,7 +73,8 @@ EmailSendResult result = EmailService.send(new EmailRequest()
 
 ### 2.2 Process `email_send_templated`
 The same request as a backend process (template, to, cc, bcc, variables JSON, linked table and
-id, idempotency key, provider, brand) for scripts, the API and other qbits. Not in the nav;
+id, idempotency key, provider by `providerId` or `providerName`, `fromAddressId` filtered by the
+chosen `providerId`, brand) for scripts, the API and other qbits. Not in the nav;
 callable through the API and `/qqq/v1/processes`.
 
 ### 2.3 Permissions
@@ -121,7 +123,16 @@ They are never stored, logged, audited, put in process output or returned. The r
 whether each named variable is set (yes or no), never the value.
 
 **Record action "Send Test Email"** (`email.admin`): queues a fixed test message to a given
-address through that provider and reports the outcome on the standard result screen.
+address through that provider and reports the outcome on the standard result screen. An optional
+`fromAddressId` picker lists only that provider's sender addresses.
+
+**Sender addresses** (`email_provider_sender_address`, a child list on the provider, `email.admin`):
+provider_id, address (validated, lowercase), display_name, is_default (at most one enabled default
+per provider), enabled, note; unique (provider_id, address); the domain must equal `sending_domain`
+when that is set. The provider's `from_address` / `from_name` remain the fallback; an enabled default
+row wins when present. A chosen id, or an explicit from text once the provider has rows, must match an
+enabled row of the resolved provider or the send is `REFUSED` ("That from address is not set up for
+provider <name>"). The row used is kept as `email_message.from_address_id`.
 
 ### 3.2 `EmailTransport` SPI (in the qbit)
 ```java
@@ -472,6 +483,7 @@ once #1162 is in an RC; one-click unsubscribe does not depend on it.
 | `email_brand` | yes | people |
 | `email_suppression` | yes | people and the qbit |
 | `email_provider` | yes | admins |
+| `email_provider_sender_address` | relation (on the provider) | admins |
 | `email_webhook_inbox` | relation (on the provider) | the qbit |
 | `email_inbound`, `email_inbound_attachment` | phase (e) | the qbit |
 
