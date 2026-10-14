@@ -143,6 +143,7 @@ public final class EmailEnums
       IN_FLIGHT,
       SUCCEEDED,
       TRANSIENT_FAILURE,
+      PROVIDER_FAILURE,
       PERMANENT_FAILURE,
       LEASE_EXPIRED;
 

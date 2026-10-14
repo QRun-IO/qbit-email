@@ -31,6 +31,7 @@ import com.kingsrook.qbits.email.EmailRuntime;
 import com.kingsrook.qbits.email.permissions.EmailPermissionChecker;
 import com.kingsrook.qbits.email.permissions.EmailPermissions;
 import com.kingsrook.qbits.email.support.SystemWrites;
+import com.kingsrook.qbits.email.transport.EmailProviderSettings;
 import com.kingsrook.qqq.backend.core.actions.customizers.TableCustomizerInterface;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
 import com.kingsrook.qqq.backend.core.model.actions.AbstractActionInput;
@@ -76,6 +77,19 @@ public final class EmailTableCustomizers
    {
       List<String> errors = new ArrayList<>();
       String kind = row.getValueString("kind");
+      if(("SMTP".equals(kind) || "GMAIL_SMTP".equals(kind))
+         && !new EmailProviderSettings(row, config).allowsSmtpAuth())
+      {
+         errors.add("SMTP sign-in needs STARTTLS or TLS");
+      }
+      for(String field : List.of("fromName", "fromAddress", "replyTo"))
+      {
+         String value = row.getValueString(field);
+         if(value != null && (value.contains("\r") || value.contains("\n")))
+         {
+            errors.add("Provider sender and reply-to fields must not contain line breaks");
+         }
+      }
       for(String field : List.of("usernameEnvName", "secretEnvName", "webhookSecretEnvName"))
       {
          String name = row.getValueString(field);

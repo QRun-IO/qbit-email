@@ -50,8 +50,9 @@ in a static variable.
 | `email_provider` | Providers, with child Messages | `email.admin`, including reads and test sends |
 
 `email.view` reads messages, templates, versions, brands and suppressions.
-`email.send` permits the Java service, bridge and backend send process, and implies
-view. `email.manage` also allows sending, Resend, Cancel and Send Now. `email.admin`
+`email.send` permits the Java service, bridge and backend send process. Reading
+messages requires `email.view`, `email.manage` or `email.admin`; send alone grants no read access.
+`email.manage` also allows sending, Resend, Cancel and Send Now. `email.admin`
 implies all permissions. Grant `email.hasAccess` for the app's derived base access.
 Enable the host's `QInstance.enforcePermissionsInCoreActions` for direct Java action
 permission enforcement; the tables and processes use the shared custom checker.
@@ -271,17 +272,28 @@ Each claim inserts a unique `(message_id, attempt_number)` row and commits SENDI
 with a lease before network I/O. Provider-row database locks serialize rate checks
 and claims across replicas; they are released before contacting the provider. Limits
 count attempts in rolling minute and 24-hour windows. Waiting consumes no attempt.
-SMTP 5xx rejections and SES permanent failures become DEAD_LETTER; transient failures
+Per-message SMTP 5xx and SES MessageRejected/InvalidParameterValue failures become
+DEAD_LETTER, as do invalid MIME addresses or headers; transient failures
 use the configured backoff. Explicit retry-after values are capped at one hour;
 the configured backoff itself is not capped.
 
 Expired attempts become LEASE_EXPIRED, then retry or dead-letter at the attempt limit.
 Late completion from an expired runner cannot overwrite the newer attempt's outcome.
 Delivery is **at least once**: provider acceptance followed by a runner crash can
-produce a repeat. Ten consecutive transient failures mark a provider UNHEALTHY;
+produce a repeat. Credential, authentication and SES account failures immediately mark
+the provider UNHEALTHY and stop its remaining deliveries for that dispatch pass.
+These attempts are recorded as PROVIDER_FAILURE and keep messages in RETRY_WAIT with
+backoff. They increment the historical attempt count but do not consume the message's
+maxAttempts budget (including during lease recovery). Ten consecutive other transient failures mark a provider UNHEALTHY;
 one queued message probes it every five minutes, and success restores HEALTHY.
 Optional core alerts raise `email.provider.unhealthy` and `email.message.dead-letter`,
 with dead-letter deduplication per provider/hour. No alert sink is required.
+Alert failures cannot fail an already committed delivery.
+
+SMTP sign-in requires STARTTLS or TLS. Plaintext authentication is refused at provider
+validation and again before connecting, except for loopback (`localhost`, `127.0.0.1`,
+`::1`) or an explicit `withAllowPlaintextSmtpAuth(true)` host configuration (default false).
+Provider sender/reply-to fields and MIME subjects/addresses cannot contain CR or LF.
 
 Messages offer standard Review/Result actions: Resend (DEAD_LETTER, BOUNCED,
 COMPLAINED, with retained content), Cancel (QUEUED/RETRY_WAIT), and Send Now

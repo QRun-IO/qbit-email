@@ -22,11 +22,21 @@ package com.kingsrook.qbits.email.transport;
 
 import java.io.ByteArrayInputStream;
 import java.lang.reflect.Proxy;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
 import com.kingsrook.qbits.email.EmailQBitConfig;
+import com.kingsrook.qbits.email.EmailRuntime;
+import com.kingsrook.qbits.email.H2Support;
+import com.kingsrook.qbits.email.delivery.EmailDispatcher;
+import com.kingsrook.qbits.email.metadata.EmailTables;
+import com.kingsrook.qbits.email.outbox.EmailRequest;
+import com.kingsrook.qbits.email.outbox.EmailService;
+import com.kingsrook.qqq.backend.core.context.QContext;
 import com.kingsrook.qqq.backend.core.model.data.QRecord;
 import com.sun.mail.smtp.SMTPAddressFailedException;
 import com.sun.mail.smtp.SMTPSendFailedException;
@@ -205,11 +215,148 @@ class EmailTransportsTest
             .isFalse();
       assertThat(SmtpEmailTransport.permanent(new jakarta.mail.AuthenticationFailedException("454 Temporary authentication failure"))).isFalse();
       assertThat(SmtpEmailTransport.permanent(new jakarta.mail.AuthenticationFailedException()))
-            .isTrue();
+            .isFalse();
+      assertThat(SmtpEmailTransport.providerLevel(new jakarta.mail.AuthenticationFailedException("535 Authentication refused"))).isTrue();
       assertThat(
                   SmtpEmailTransport.permanent(
                         new SMTPSendFailedException("DATA", 550, "failed", null, null, null, null)))
             .isTrue();
+   }
+
+   /*******************************************************************************
+    ** Account and credential errors are provider failures, not message rejections.
+    *******************************************************************************/
+   @Test
+   void sesAccountFailuresAreRetryable() throws Exception
+   {
+      for(String code : List.of("AccountSuspended", "SendingPaused", "MailFromDomainNotVerified", "InvalidClientTokenId", "SignatureDoesNotMatch"))
+      {
+         assertSesFailure(400, code, true, false);
+      }
+      assertSesFailure(401, "Unauthorized", true, false);
+      assertSesFailure(403, "AccessDenied", true, false);
+      assertSesFailure(400, "InvalidParameterValue", false, true);
+      assertSesFailure(400, "MessageRejected", false, true);
+      assertSesFailure(429, "TooManyRequests", false, false);
+      assertSesFailure(503, "ServiceUnavailable", false, false);
+   }
+
+   /*******************************************************************************
+    ** SES 403 is persisted as an unhealthy provider and recovers without a dead letter.
+    *******************************************************************************/
+   @Test
+   void sesForbiddenPausesProviderAndRecovers() throws Exception
+   {
+      var now = Instant.parse("2026-10-13T12:00:00Z");
+      try
+      {
+         H2Support.setup(config -> config.withMaxAttempts(1));
+         EmailRuntime.setClock(Clock.fixed(now, ZoneOffset.UTC));
+         H2Support.insert(EmailTables.PROVIDER,
+            new QRecord().withValue("kind", "SES").withValue("name", "ses").withValue("region", "us-east-1")
+               .withValue("fromAddress", "sender@example.com").withValue("enabled", true).withValue("isDefault", true));
+         var queued = EmailService.send(new EmailRequest()
+            .withTo("a@example.com").withSubject("subject").withTextBody("body"));
+         AtomicReference<Boolean> forbidden = new AtomicReference<>(true);
+         var transport = new SesEmailTransport(builder -> client(request ->
+         {
+            if(forbidden.get())
+            {
+               throw SesV2Exception.builder().statusCode(403).message("private diagnostic").build();
+            }
+            return (SendEmailResponse.builder().messageId("ses-ok").build());
+         }));
+         var dispatcher = new EmailDispatcher(new EmailTransportRegistry().withTransport("SES", transport));
+         assertThat(dispatcher.runOnce().failed()).isEqualTo(1);
+         assertThat(H2Support.all(EmailTables.PROVIDER).getFirst().getValueString("healthStatus"))
+            .isEqualTo("UNHEALTHY");
+         assertThat(H2Support.all(EmailTables.MESSAGE).getFirst().getValueString("status"))
+            .isEqualTo("RETRY_WAIT");
+         forbidden.set(false);
+         EmailRuntime.setClock(Clock.fixed(now.plusSeconds(301), ZoneOffset.UTC));
+         assertThat(dispatcher.sendNow(queued.messageId())).isEqualTo(EmailDispatcher.SendResult.SENT);
+         assertThat(H2Support.all(EmailTables.PROVIDER).getFirst().getValueString("healthStatus"))
+            .isEqualTo("HEALTHY");
+      }
+      finally
+      {
+         QContext.clear();
+         EmailRuntime.setClock(null);
+      }
+   }
+
+   /*******************************************************************************
+    ** Exercise classification through the real SES send path with a fake client.
+    *******************************************************************************/
+   private void assertSesFailure(int status, String code, boolean provider, boolean permanent)
+   {
+      var transport = new SesEmailTransport(builder -> client(request ->
+      {
+         throw SesV2Exception.builder().statusCode(status).message("private diagnostic")
+            .awsErrorDetails(software.amazon.awssdk.awscore.exception.AwsErrorDetails.builder().errorCode(code).build()).build();
+      }));
+      assertThatThrownBy(() -> transport.send(envelope(), settings())).isInstanceOfSatisfying(EmailTransportException.class, error ->
+      {
+         assertThat(error.getProviderLevel()).isEqualTo(provider);
+         assertThat(error.getPermanent()).isEqualTo(permanent);
+         assertThat(error.getMessage()).doesNotContain("private diagnostic");
+         assertThat(error.getCause()).isNull();
+      });
+   }
+
+   /*******************************************************************************
+    ** MIME construction refuses CR and LF in every address role and the subject.
+    *******************************************************************************/
+   @Test
+   void mimeRejectsHeaderInjectionAndBuildFailuresArePermanent()
+   {
+      for(String newline : List.of("\r", "\n"))
+      {
+         String bad = "a@example.com" + newline + "Bcc: hidden@example.com";
+         for(EmailEnvelope envelope : List.of(envelope().withSubject(bad), envelope().withFrom(bad), envelope().withReplyTo(bad),
+            envelope().withTo(List.of(bad)), envelope().withCc(List.of(bad)), envelope().withBcc(List.of(bad)),
+            envelope().withHeaders(Map.of("X-Test", bad)), envelope().withFrom("broken <")))
+         {
+            assertThatThrownBy(() -> EmailMime.build(Session.getInstance(new Properties()), envelope)).isInstanceOf(MessagingException.class);
+            var smtp = new EmailProviderSettings(new QRecord().withValue("kind", "SMTP").withValue("host", "127.0.0.1")
+               .withValue("port", 1).withValue("security", "NONE"), new EmailQBitConfig());
+            for(EmailTransport transport : List.of(new SmtpEmailTransport(), new SesEmailTransport(builder ->
+            {
+               throw new AssertionError("Invalid MIME must not reach the client");
+            })))
+            {
+               assertThatThrownBy(() -> transport.send(envelope, transport instanceof SmtpEmailTransport ? smtp : settings()))
+                  .isInstanceOfSatisfying(EmailTransportException.class, error ->
+                  {
+                     assertThat(error.getPermanent()).isTrue();
+                     assertThat(error.getProviderLevel()).isFalse();
+                  });
+            }
+         }
+      }
+   }
+
+   /*******************************************************************************
+    ** Guard legacy rows before resolving any secret or opening a connection.
+    *******************************************************************************/
+   @Test
+   void smtpBlocksPlaintextAuthenticationBeforeConnecting()
+   {
+      for(String kind : List.of("SMTP", "GMAIL_SMTP"))
+      {
+         var row = new QRecord().withValue("kind", kind).withValue("host", "relay.example.com").withValue("port", 25)
+            .withValue("security", "NONE").withValue("usernameEnvName", "EMAIL_SMTP_USERNAME");
+         var config = new EmailQBitConfig().withSecretResolver(name ->
+         {
+            throw new AssertionError("Must reject before resolving credentials");
+         });
+         assertThatThrownBy(() -> new SmtpEmailTransport().send(envelope(), new EmailProviderSettings(row, config)))
+            .hasMessage("SMTP sign-in needs STARTTLS or TLS").isInstanceOfSatisfying(EmailTransportException.class, error ->
+            {
+               assertThat(error.getProviderLevel()).isTrue();
+               assertThat(error.getPermanent()).isFalse();
+            });
+      }
    }
 
    /*******************************************************************************
@@ -227,13 +374,21 @@ class EmailTransportsTest
       var row = new QRecord().withValue("kind", "SMTP").withValue("secretEnvName", "INVALID");
       assertThatThrownBy(
                   () -> new EmailProviderSettings(row, new EmailQBitConfig()).resolve("secretEnvName"))
-            .hasMessageContaining("not allowed");
+            .hasMessageContaining("not allowed").isInstanceOfSatisfying(EmailTransportException.class, error ->
+            {
+               assertThat(error.getProviderLevel()).isTrue();
+               assertThat(error.getPermanent()).isFalse();
+            });
       row.withValue("secretEnvName", "EMAIL_SMTP_PASSWORD");
       assertThatThrownBy(
                   () ->
                         new EmailProviderSettings(row, new EmailQBitConfig().withSecretResolver(n -> null))
                               .resolve("secretEnvName"))
-            .hasMessageContaining("not set");
+            .hasMessageContaining("not set").isInstanceOfSatisfying(EmailTransportException.class, error ->
+            {
+               assertThat(error.getProviderLevel()).isTrue();
+               assertThat(error.getPermanent()).isFalse();
+            });
       assertThatThrownBy(
                   () ->
                         new EmailProviderSettings(

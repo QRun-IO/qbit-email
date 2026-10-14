@@ -24,7 +24,9 @@ package com.kingsrook.qbits.email.delivery;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import com.kingsrook.qbits.email.EmailQBitConfig;
 import com.kingsrook.qbits.email.EmailRuntime;
@@ -84,6 +86,7 @@ public class EmailDispatcher
       SENT,
       RETRY_WAIT,
       DEAD_LETTER,
+      PROVIDER_FAILURE,
       NOT_SENT
    }
 
@@ -129,6 +132,7 @@ public class EmailDispatcher
       int failed = 0;
       int skipped = 0;
       Integer afterId = 0;
+      Set<Integer> failedProviders = new HashSet<>();
       while(sent + failed < EmailRuntime.config().getBatchSize())
       {
          QQueryFilter pageFilter = filter.clone().withCriteria(new QFilterCriteria("id", QCriteriaOperator.GREATER_THAN, afterId));
@@ -140,12 +144,30 @@ public class EmailDispatcher
          for(QRecord row : page)
          {
             afterId = row.getValueInteger("id");
-            SendResult result = attempt(afterId, false);
-            switch(result)
+            if(failedProviders.contains(row.getValueInteger("providerId")))
             {
-               case SENT -> sent++;
-               case RETRY_WAIT, DEAD_LETTER -> failed++;
-               default -> skipped++;
+               skipped++;
+               continue;
+            }
+            try
+            {
+               SendResult result = attempt(afterId, false);
+               switch(result)
+               {
+                  case SENT -> sent++;
+                  case RETRY_WAIT, DEAD_LETTER -> failed++;
+                  case PROVIDER_FAILURE ->
+                  {
+                     failed++;
+                     failedProviders.add(row.getValueInteger("providerId"));
+                  }
+                  default -> skipped++;
+               }
+            }
+            catch(QException | RuntimeException e)
+            {
+               failed++;
+               LOG.warn("Email attempt failed", logPair("messageId", afterId));
             }
             if(sent + failed >= EmailRuntime.config().getBatchSize())
             {
@@ -161,13 +183,14 @@ public class EmailDispatcher
     *******************************************************************************/
    public SendResult sendNow(Integer id) throws QException
    {
-      return (attempt(id, true));
+      SendResult result = attempt(id, true);
+      return (result == SendResult.PROVIDER_FAILURE ? SendResult.RETRY_WAIT : result);
    }
 
    /*******************************************************************************
     ** Claim, send outside the transaction, then persist the fenced result.
     *******************************************************************************/
-   private SendResult attempt(Integer id, boolean now) throws QException
+   protected SendResult attempt(Integer id, boolean now) throws QException
    {
       Claim claim = claim(id, now);
       if(claim == null)
@@ -225,12 +248,12 @@ public class EmailDispatcher
                return (null);
             }
             expire(message, tx, time);
-            if(previous >= config.getMaxAttempts())
+            if(budgetAttempts(id, previous, tx) >= config.getMaxAttempts())
             {
                EmailStore.update(EmailTables.MESSAGE, new QRecord().withValue("id", id).withValue("status", "DEAD_LETTER")
                   .withValue("deadLetterDate", time).withValue("finishedDate", time).withValue("leaseExpiresDate", null).withValue("nextAttemptDate", null).withValue("lastError", "Attempt lease expired"), tx);
                tx.commit();
-               EmailAlerts.raise(EmailAlerts.DEAD_LETTER, provider.getValueInteger("id"));
+               alert(() -> EmailAlerts.raise(EmailAlerts.DEAD_LETTER, provider.getValueInteger("id")));
                return (null);
             }
          }
@@ -321,13 +344,18 @@ public class EmailDispatcher
          Instant now = EmailRuntime.clock().instant();
          boolean success = error == null && result != null;
          boolean permanent = error != null && error.getPermanent();
+         boolean providerLevel = error != null && error.getProviderLevel();
          String safeError = error == null ? null : permanent ? "Provider rejected the message" : "Provider temporarily unavailable";
+         if(providerLevel)
+         {
+            safeError = "Credentials missing or refused";
+         }
          if(error != null && "Provider transport not available until phase (b)".equals(error.getMessage()))
          {
             safeError = "Provider transport not available until phase (b)";
          }
          EmailStore.update(EmailTables.ATTEMPT, new QRecord().withValue("id", claim.attempt().getValue("id"))
-            .withValue("outcome", success ? "SUCCEEDED" : permanent ? "PERMANENT_FAILURE" : "TRANSIENT_FAILURE")
+            .withValue("outcome", success ? "SUCCEEDED" : providerLevel ? "PROVIDER_FAILURE" : permanent ? "PERMANENT_FAILURE" : "TRANSIENT_FAILURE")
             .withValue("endDate", now).withValue("durationMillis", (int) Math.max(0, Duration.between(claim.attempt().getValueInstant("startDate"), now).toMillis()))
             .withValue("error", safeError), tx);
          QRecord update = new QRecord().withValue("id", message.getValue("id")).withValue("leaseExpiresDate", null).withValue("lastError", safeError);
@@ -340,7 +368,7 @@ public class EmailDispatcher
          }
          else
          {
-            boolean dead = permanent || number >= EmailRuntime.config().getMaxAttempts();
+            boolean dead = permanent || (!providerLevel && budgetAttempts(message.getValueInteger("id"), number, tx) >= EmailRuntime.config().getMaxAttempts());
             outcome = dead ? SendResult.DEAD_LETTER : SendResult.RETRY_WAIT;
             long seconds = 60L * EmailRuntime.config().retryMinutesAfterAttempt(number);
             if(error != null && error.getRetryAfter() != null)
@@ -349,7 +377,7 @@ public class EmailDispatcher
             }
             update.withValue("status", outcome.name()).withValue("deadLetterDate", dead ? now : null).withValue("finishedDate", dead ? now : null).withValue("nextAttemptDate", dead ? null : now.plusSeconds(seconds));
             QRecord health = new QRecord().withValue("id", providerId).withValue("lastFailureDate", now).withValue("lastFailureMessage", safeError);
-            if(!permanent && consecutiveFailures(providerId, tx) >= 10)
+            if(providerLevel || (!permanent && consecutiveFailures(providerId, tx) >= 10))
             {
                health.withValue("healthStatus", "UNHEALTHY");
             }
@@ -360,18 +388,42 @@ public class EmailDispatcher
          tx.commit();
          if(success && "UNHEALTHY".equals(provider.getValueString("healthStatus")))
          {
-            EmailAlerts.recovered(providerId);
+            alert(() -> EmailAlerts.recovered(providerId));
          }
          if("UNHEALTHY".equals(updatedProvider.getValueString("healthStatus")) && !"UNHEALTHY".equals(provider.getValueString("healthStatus")))
          {
-            EmailAlerts.raise(EmailAlerts.UNHEALTHY, providerId);
+            alert(() -> EmailAlerts.raise(EmailAlerts.UNHEALTHY, providerId));
          }
          if(outcome == SendResult.DEAD_LETTER)
          {
-            EmailAlerts.raise(EmailAlerts.DEAD_LETTER, providerId);
+            alert(() -> EmailAlerts.raise(EmailAlerts.DEAD_LETTER, providerId));
          }
          LOG.info("Email attempt completed", logPair("messageId", message.getValue("id")), logPair("status", outcome.name()));
-         return (outcome);
+         return (providerLevel ? SendResult.PROVIDER_FAILURE : outcome);
+      }
+   }
+
+   /*******************************************************************************
+    ** Keep claim numbering monotonic while excluding provider failures from limits.
+    *******************************************************************************/
+   private static long budgetAttempts(Integer messageId, int attempts, QBackendTransaction tx) throws QException
+   {
+      return (attempts - SystemWrites.count(EmailTables.ATTEMPT, EmailStore.equal("messageId", messageId)
+         .withCriteria(new QFilterCriteria("outcome", QCriteriaOperator.EQUALS, "PROVIDER_FAILURE")), tx));
+   }
+
+   /*******************************************************************************
+    ** Optional alerting must never change the result of a committed delivery.
+    *******************************************************************************/
+   private static void alert(Runnable notification)
+   {
+      try
+      {
+         notification.run();
+      }
+      catch(RuntimeException e)
+      {
+         LOG.warn("Email alert unavailable");
       }
    }
 
@@ -451,7 +503,7 @@ public class EmailDispatcher
                continue;
             }
             expire(current, tx, now);
-            boolean dead = current.getValueInteger("attemptCount") >= EmailRuntime.config().getMaxAttempts();
+            boolean dead = budgetAttempts(current.getValueInteger("id"), current.getValueInteger("attemptCount"), tx) >= EmailRuntime.config().getMaxAttempts();
             EmailStore.update(EmailTables.MESSAGE, new QRecord().withValue("id", current.getValue("id"))
                .withValue("status", dead ? "DEAD_LETTER" : "RETRY_WAIT").withValue("nextAttemptDate", dead ? null : now)
                .withValue("leaseExpiresDate", null).withValue("lastError", "Attempt lease expired")
@@ -459,7 +511,7 @@ public class EmailDispatcher
             tx.commit();
             if(dead)
             {
-               EmailAlerts.raise(EmailAlerts.DEAD_LETTER, candidate.getValueInteger("providerId"));
+               alert(() -> EmailAlerts.raise(EmailAlerts.DEAD_LETTER, candidate.getValueInteger("providerId")));
             }
          }
       }

@@ -49,6 +49,10 @@ final class EmailMime
     *******************************************************************************/
    static MimeMessage build(Session session, EmailEnvelope envelope) throws MessagingException
    {
+      noLineBreaks(envelope.getSubject());
+      noLineBreaks(envelope.getFrom());
+      noLineBreaks(envelope.getReplyTo());
+      noLineBreaks(envelope.getMessageId());
       MimeMessage message = new MimeMessage(session);
       message.setFrom(new InternetAddress(envelope.getFrom(), true));
       recipients(message, Message.RecipientType.TO, envelope.getTo());
@@ -87,9 +91,24 @@ final class EmailMime
     *******************************************************************************/
    private static void recipients(MimeMessage message, Message.RecipientType type, List<String> addresses) throws MessagingException
    {
+      for(String address : addresses)
+      {
+         noLineBreaks(address);
+      }
       if(!addresses.isEmpty())
       {
          message.setRecipients(type, InternetAddress.parse(String.join(",", addresses), true));
+      }
+   }
+
+   /*******************************************************************************
+    ** Reject header injection even for envelopes that bypass queue validation.
+    *******************************************************************************/
+   private static void noLineBreaks(String value) throws MessagingException
+   {
+      if(value != null && (value.contains("\r") || value.contains("\n")))
+      {
+         throw (new MessagingException("Invalid envelope header"));
       }
    }
 }
