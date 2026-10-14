@@ -19,7 +19,15 @@ Design: `docs/DESIGN.md`.
 ## Architecture
 
 - **Entry point:** `EmailQBitProducer implements QBitMetaDataProducer<EmailQBitConfig>`, package `com.kingsrook.qbits.email`.
-- Packages are added per phase as `docs/DESIGN.md` describes.
+- `metadata`: seven tables, enum sources, relations and provider/suppression validation.
+- `outbox`: EmailService, requests/results and the replaceable ad-hoc renderer.
+- `delivery`: durable dispatcher, attempt leases, rate limits, health and optional alerts.
+- `transport`: shared MIME, SMTP/SES transports, settings and registry.
+- `bridge`: QBIT_EMAIL adapter for core SendMessageAction.
+- `processes`: Review/Result record actions, backend send API and scheduled jobs.
+- `permissions`, `app`, `support`: custom permission checker, app/navigation and authorized database operations.
+- `EmailRuntime` resolves config from the current instance; `EmailIntegrations` declares ESB, API and Quick Search tables.
+- Templates/branding/PHI/full home rendering are part 2; their tables exist now.
 
 ## Invariants
 

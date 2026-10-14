@@ -1,0 +1,256 @@
+/*
+ * QQQ - Low-code Application Framework for Engineers.
+ * Copyright (C) 2021-2025.  Kingsrook, LLC
+ * 651 N Broad St Ste 205 # 6917 | Middletown DE 19709 | United States
+ * contact@kingsrook.com
+ * https://github.com/Kingsrook/
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.kingsrook.qbits.email.transport;
+
+import java.io.ByteArrayInputStream;
+import java.lang.reflect.Proxy;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.concurrent.atomic.AtomicReference;
+import com.kingsrook.qbits.email.EmailQBitConfig;
+import com.kingsrook.qqq.backend.core.model.data.QRecord;
+import com.sun.mail.smtp.SMTPAddressFailedException;
+import com.sun.mail.smtp.SMTPSendFailedException;
+import jakarta.mail.MessagingException;
+import jakarta.mail.SendFailedException;
+import jakarta.mail.Session;
+import jakarta.mail.internet.InternetAddress;
+import jakarta.mail.internet.MimeMessage;
+import org.junit.jupiter.api.Test;
+import software.amazon.awssdk.services.sesv2.SesV2Client;
+import software.amazon.awssdk.services.sesv2.model.*;
+import static org.assertj.core.api.Assertions.*;
+
+/*******************************************************************************
+ ** Email Transports Test.
+ *******************************************************************************/
+class EmailTransportsTest
+{
+   /*******************************************************************************
+    ** Envelope.
+    *******************************************************************************/
+   EmailEnvelope envelope()
+   {
+      return (new EmailEnvelope()
+            .withMessageId("123")
+            .withFrom("sender@example.com")
+            .withTo(List.of("a@example.com"))
+            .withBcc(List.of("hidden@example.com"))
+            .withReplyTo("reply@example.com")
+            .withSubject("Subject")
+            .withHtmlBody("<p>HTML</p>")
+            .withTextBody("Text")
+            .withHeaders(Map.of("X-Test", "yes")));
+   }
+
+   /*******************************************************************************
+    ** Settings.
+    *******************************************************************************/
+   EmailProviderSettings settings()
+   {
+      return (new EmailProviderSettings(
+            new QRecord()
+                  .withValue("kind", "SES")
+                  .withValue("region", "us-east-1")
+                  .withValue("configurationSet", "events")
+                  .withValue("usernameEnvName", "AWS_ACCESS_KEY_ID")
+                  .withValue("secretEnvName", "AWS_SECRET_ACCESS_KEY"),
+            new EmailQBitConfig().withSecretResolver(n -> "test-only")));
+   }
+
+   /*******************************************************************************
+    ** Client.
+    *******************************************************************************/
+   SesV2Client client(java.util.function.Function<SendEmailRequest, SendEmailResponse> send)
+   {
+      return ((SesV2Client)
+            Proxy.newProxyInstance(
+                  getClass().getClassLoader(),
+                  new Class<?>[] {SesV2Client.class},
+                  (proxy, method, args) ->
+                  {
+                     if(method.getName().equals("sendEmail"))
+                     {
+                        return (send.apply((SendEmailRequest) args[0]));
+                     }
+                     if(method.getName().equals("serviceName"))
+                     {
+                        return ("sesv2");
+                     }
+                     return (null);
+                  }));
+   }
+
+   /*******************************************************************************
+    ** Ses Success Preserves Mime And Does Not Expose Bcc.
+    *******************************************************************************/
+   @Test
+   void sesSuccessPreservesMimeAndDoesNotExposeBcc() throws Exception
+   {
+      AtomicReference<SendEmailRequest> captured = new AtomicReference<>();
+      var transport =
+            new SesEmailTransport(
+                  builder ->
+                        client(
+                              request ->
+                              {
+                                 captured.set(request);
+                                 return (SendEmailResponse.builder().messageId("ses-id").build());
+                              }));
+      assertThat(transport.send(envelope().withTo(List.of("Pat <a@example.com>, b@example.com")), settings()).providerMessageId()).isEqualTo("ses-id");
+      assertThat(captured.get().destination().toAddresses()).containsExactly("a@example.com", "b@example.com");
+      assertThat(captured.get().configurationSetName()).isEqualTo("events");
+      assertThat(captured.get().destination().bccAddresses()).containsExactly("hidden@example.com");
+      var mime =
+            new MimeMessage(
+                  Session.getInstance(new Properties()),
+                  new ByteArrayInputStream(captured.get().content().raw().data().asByteArray()));
+      assertThat(mime.getHeader("Bcc")).isNull();
+      assertThat(mime.getHeader("X-Test")).containsExactly("yes");
+      assertThat(mime.getHeader("Auto-Submitted")).containsExactly("auto-generated");
+   }
+
+   /*******************************************************************************
+    ** Ses Classifies Throttling Rejection And Server Failure.
+    *******************************************************************************/
+   @Test
+   void sesClassifiesThrottlingRejectionAndServerFailure() throws Exception
+   {
+      for(var error :
+            List.of(
+                  TooManyRequestsException.builder().statusCode(429).message("secret").build(),
+                  MessageRejectedException.builder().statusCode(400).message("secret").build(),
+                  SesV2Exception.builder().statusCode(503).message("secret").build()))
+                  {
+         var transport =
+               new SesEmailTransport(
+                     builder ->
+                           client(
+                                 request ->
+                                 {
+                                    throw error;
+                                 }));
+         try
+         {
+            transport.send(envelope(), settings());
+            fail("Expected failure");
+         }
+         catch(EmailTransportException actual)
+         {
+            assertThat(actual.getPermanent()).isEqualTo(error.statusCode() == 400);
+            assertThat(actual.getMessage()).doesNotContain("secret");
+            assertThat(actual.getCause()).isNull();
+         }
+      }
+      var defaultChain =
+            new EmailProviderSettings(
+                  new QRecord().withValue("kind", "SES").withValue("region", "us-east-1"),
+                  new EmailQBitConfig());
+      assertThat(
+                  new SesEmailTransport(
+                              builder ->
+                                    client(r -> SendEmailResponse.builder().messageId("default").build()))
+                        .send(envelope(), defaultChain)
+                        .providerMessageId())
+            .isEqualTo("default");
+      assertThatThrownBy(
+                  () ->
+                        new SesEmailTransport(
+                                    b ->
+                                    {
+                                       throw new IllegalArgumentException("secret");
+                                    })
+                              .send(envelope(), settings()))
+            .hasMessage("SES temporarily unavailable");
+   }
+
+   /*******************************************************************************
+    ** Smtp Classifies Nested Replies.
+    *******************************************************************************/
+   @Test
+   void smtpClassifiesNestedReplies() throws Exception
+   {
+      var permanent =
+            new SMTPAddressFailedException(
+                  new InternetAddress("a@example.com"), "RCPT TO", 550, "secret recipient");
+      var transientError =
+            new SMTPAddressFailedException(
+                  new InternetAddress("a@example.com"), "RCPT TO", 450, "temporary");
+      var wrapper = new SendFailedException("failed");
+      wrapper.setNextException(permanent);
+      assertThat(SmtpEmailTransport.permanent(wrapper)).isTrue();
+      assertThat(SmtpEmailTransport.permanent(transientError)).isFalse();
+      assertThat(
+                  SmtpEmailTransport.permanent(
+                        new MessagingException("timeout", new java.net.SocketTimeoutException())))
+            .isFalse();
+      assertThat(SmtpEmailTransport.permanent(new jakarta.mail.AuthenticationFailedException("454 Temporary authentication failure"))).isFalse();
+      assertThat(SmtpEmailTransport.permanent(new jakarta.mail.AuthenticationFailedException()))
+            .isTrue();
+      assertThat(
+                  SmtpEmailTransport.permanent(
+                        new SMTPSendFailedException("DATA", 550, "failed", null, null, null, null)))
+            .isTrue();
+   }
+
+   /*******************************************************************************
+    ** Settings Validate References And Missing Secrets.
+    *******************************************************************************/
+   @Test
+   void settingsValidateReferencesAndMissingSecrets() throws Exception
+   {
+      var gmail =
+            new EmailProviderSettings(
+                  new QRecord().withValue("kind", "GMAIL_SMTP"), new EmailQBitConfig());
+      assertThat(gmail.host()).isEqualTo("smtp.gmail.com");
+      assertThat(gmail.port()).isEqualTo(587);
+      assertThat(gmail.security()).isEqualTo("STARTTLS");
+      var row = new QRecord().withValue("kind", "SMTP").withValue("secretEnvName", "INVALID");
+      assertThatThrownBy(
+                  () -> new EmailProviderSettings(row, new EmailQBitConfig()).resolve("secretEnvName"))
+            .hasMessageContaining("not allowed");
+      row.withValue("secretEnvName", "EMAIL_SMTP_PASSWORD");
+      assertThatThrownBy(
+                  () ->
+                        new EmailProviderSettings(row, new EmailQBitConfig().withSecretResolver(n -> null))
+                              .resolve("secretEnvName"))
+            .hasMessageContaining("not set");
+      assertThatThrownBy(
+                  () ->
+                        new EmailProviderSettings(
+                                    row,
+                                    new EmailQBitConfig()
+                                          .withSecretResolver(
+                                                n ->
+                                                {
+                                                   throw new RuntimeException("secret");
+                                                }))
+                              .resolve("secretEnvName"))
+            .hasMessageContaining("not set");
+      assertThatThrownBy(
+                  () ->
+                        EmailMime.build(
+                              Session.getInstance(new Properties()),
+                              envelope().withHeaders(Map.of("X-Header", "bad\r\nvalue"))))
+            .isInstanceOf(MessagingException.class);
+   }
+}

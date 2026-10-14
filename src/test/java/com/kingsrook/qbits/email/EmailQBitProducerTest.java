@@ -20,14 +20,12 @@
 
 package com.kingsrook.qbits.email;
 
-
 import com.kingsrook.qqq.backend.core.exceptions.QException;
-import com.kingsrook.qqq.backend.core.model.metadata.QInstance;
 import com.kingsrook.qqq.backend.core.model.metadata.QBackendMetaData;
+import com.kingsrook.qqq.backend.core.model.metadata.QInstance;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
 
 /*******************************************************************************
  ** Scaffold checks for the producer and config.
@@ -42,17 +40,16 @@ class EmailQBitProducerTest
    {
       QInstance instance = new QInstance();
       instance.addBackend(new QBackendMetaData().withName("memory"));
-      EmailQBitProducer producer = new EmailQBitProducer()
-         .withNamespace(null)
-         .withQBitConfig(new EmailQBitConfig().withBackendName("memory"));
+      EmailQBitProducer producer =
+            new EmailQBitProducer()
+                  .withNamespace(null)
+                  .withQBitConfig(new EmailQBitConfig().withBackendName("memory"));
       assertThat(producer.isEnabled()).isTrue();
       assertThat(producer.getNamespace()).isNull();
       assertThat(producer.getQBitConfig().getBackendName()).isEqualTo("memory");
       assertThat(producer.produce(instance)).isNotNull();
       assertThat(instance.getQBits()).isNotEmpty();
    }
-
-
 
    /*******************************************************************************
     ** A missing or unknown backend is refused; no config means disabled.
@@ -61,9 +58,19 @@ class EmailQBitProducerTest
    void refusesInvalidConfig()
    {
       assertThat(new EmailQBitProducer().isEnabled()).isFalse();
-      assertThatThrownBy(() -> new EmailQBitProducer().withQBitConfig(new EmailQBitConfig()).produce(new QInstance()))
-         .isInstanceOf(QException.class).hasMessageContaining("backendName is required");
-      assertThatThrownBy(() -> new EmailQBitProducer().withQBitConfig(new EmailQBitConfig().withBackendName("nope")).produce(new QInstance()))
-         .isInstanceOf(QException.class).hasMessageContaining("backend not found");
+      assertThatThrownBy(
+                  () ->
+                        new EmailQBitProducer()
+                              .withQBitConfig(new EmailQBitConfig())
+                              .produce(new QInstance()))
+            .isInstanceOf(QException.class)
+            .hasMessageContaining("backendName is required");
+      assertThatThrownBy(
+                  () ->
+                        new EmailQBitProducer()
+                              .withQBitConfig(new EmailQBitConfig().withBackendName("nope"))
+                              .produce(new QInstance()))
+            .isInstanceOf(QException.class)
+            .hasMessageContaining("backend not found");
    }
 }
