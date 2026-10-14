@@ -62,7 +62,18 @@ public final class EmailHomeView
     *******************************************************************************/
    public static String render(List<Integer> totals, ChartData hourly, List<QRecord> providers, boolean admin, List<QRecord> messages, ChartData suppressions)
    {
+      return (render(totals, hourly, providers, admin, messages, suppressions, List.of()));
+   }
+
+
+
+   /*******************************************************************************
+    ** The same home with the Setup card first (email admins), when there are items.
+    *******************************************************************************/
+   public static String render(List<Integer> totals, ChartData hourly, List<QRecord> providers, boolean admin, List<QRecord> messages, ChartData suppressions, List<EmailSetupStatus.Item> setup)
+   {
       StringBuilder html = new StringBuilder("<div style=\"" + WRAP + "display:flex;flex-direction:column;gap:16px;color:inherit;line-height:1.4\">");
+      setup(html, setup);
       html.append("<div style=\"" + WRAP + "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr));gap:12px\">");
       List<String> labels = List.of("Sent (24 h)", "Delivered (24 h)", "Dead letters (24 h)", "Bounced (7 d)", "Complaints (7 d)", "Suppressed addresses");
       for(int i = 0; i < labels.size(); i++)
@@ -78,6 +89,46 @@ public final class EmailHomeView
       messages(html, messages);
       bars(html, "Suppressions added, last 30 days", suppressions);
       return (html.append("</div>").toString());
+   }
+
+
+
+   /*******************************************************************************
+    ** The Setup card: each part of Email, set up or not, and the next step, linked
+    ** to its table.
+    *******************************************************************************/
+   private static void setup(StringBuilder html, List<EmailSetupStatus.Item> items)
+   {
+      if(items.isEmpty())
+      {
+         return;
+      }
+      section(html, "Setup");
+      long todo = items.stream().filter(item -> item.state() == EmailSetupStatus.State.TODO).count();
+      html.append("<p style=\"margin:0 0 8px;opacity:.75\">").append(todo == 0 ? "Everything Email needs is set up." : todo + (todo == 1 ? " item needs" : " items need") + " attention.").append("</p>");
+      for(EmailSetupStatus.Item item : items)
+      {
+         String color = switch(item.state())
+         {
+            case OK -> OK;
+            case TODO -> FAIL;
+            case DEFAULT -> "#d97706";
+            case OPTIONAL -> "#808080";
+         };
+         String label = switch(item.state())
+         {
+            case OK -> "Set up";
+            case TODO -> "Needs setup";
+            case DEFAULT -> "Using defaults";
+            case OPTIONAL -> "Optional";
+         };
+         String name = item.tableName() == null ? esc(item.label()) : "<a style=\"color:inherit\" href=\"/app/" + esc(item.tableName()) + "\">" + esc(item.label()) + "</a>";
+         html.append("<div style=\"").append(ROW).append("\">")
+            .append(cell("Part", "<strong>" + name + "</strong><br><span style=\"color:" + color + "\">" + label + "</span>"))
+            .append(cell("Status", esc(item.detail())))
+            .append(cell("Next step", esc(item.nextStep() == null ? "Nothing to do" : item.nextStep()))).append("</div>");
+      }
+      html.append("</section>");
    }
 
 

@@ -32,6 +32,7 @@ import com.kingsrook.qbits.email.EmailRuntime;
 import com.kingsrook.qbits.email.metadata.EmailTables;
 import com.kingsrook.qbits.email.permissions.EmailPermissionChecker;
 import com.kingsrook.qbits.email.permissions.EmailPermissions;
+import com.kingsrook.qbits.email.template.EmailBuiltIns;
 import com.kingsrook.qqq.backend.core.actions.tables.CountAction;
 import com.kingsrook.qqq.backend.core.actions.tables.QueryAction;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
@@ -101,7 +102,13 @@ public final class EmailHome
             provider.setValue("headroom", Math.max(0, limit - used));
          }
       }
-      return (new RawHTML(null, EmailHomeView.render(totals, hourly(), providers, admin, messages, suppressions())));
+      List<EmailSetupStatus.Item> setup = List.of();
+      if(admin)
+      {
+         EmailBuiltIns.ensure();
+         setup = EmailSetupStatus.load();
+      }
+      return (new RawHTML(null, EmailHomeView.render(totals, hourly(), providers, admin, messages, suppressions(), setup)));
    }
 
    /*******************************************************************************
