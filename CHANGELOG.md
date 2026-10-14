@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- Central `email.provider.<id>` and `email.readiness` health checks (DEPENDENCY, EMAIL, 300 seconds), using passive provider state and existing category readiness with deadline and secret-safety coverage. Standard Email health status widget links to central checks. Requires the unreleased QQQ health SPI; POM version unchanged.
 - `EmailApiReadiness.failedChecks()` and `failed(check)` with `EmailApiReadinessCheck` (NOT_INSTALLED, PROVIDER_MISSING, PROVIDER_INVALID, PHI_PROVIDER, PUBLIC_BASE_URL, UNSUBSCRIBE_KEY, BRAND_POSTAL_ADDRESS, BODY_KEY), so callers react to a specific prerequisite without parsing reason text.
 - `EmailApi.sendOnce` as the public durable-effect handoff, with API-only outcome/result types, committed enqueue/replay semantics and suppression/transaction refusal parity. Exact idempotency-key and RFC Message-ID lookups return `EmailApiMessage`, which now includes `rfcMessageId` across all lookup routes. Public requests support ordinary caller transactions; `EmailEffects`, `EmailEffectOutcome` and `EmailMessageRef` are deprecated internals. H2 parity, reconciliation, storage-failure and API-boundary coverage; no new dependencies.
 - Stable `com.kingsrook.qbits.email.api` contract for cross-qbit sends, create-once templates, metadata-only message lookups, enabled sender addresses, default provider selection and secret-safe readiness (including marketing and PHI prerequisites). JDK/QQQ-only signatures, complete request/status mapping tests and a reflection package-boundary guard; no new dependencies.
@@ -36,3 +37,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - QBIT_EMAIL core messaging bridge, Review/Result actions, backend send process, dispatch/maintenance/retention schedules and host integration declarations.
 - H2 concurrency and transaction tests, GreenMail end-to-end tests, fake SES tests, metadata/permission checks and process-runner coverage.
 - Repository scaffold to the QRun qbit repository standard (Apache-2.0, CircleCI qqq-orb 0.6.8 with the `configure-package-install` pre-step, GA-only `publish_release`, the `release-rc` caller workflow).
+
+### Removed
+- The Email home's standalone Provider health listing, including per-provider failure messages, last-success details and rate-headroom queries. Passive delivery health and `email.provider.unhealthy` alerts are retained.

@@ -157,6 +157,32 @@ and credential failures pause the provider. Tracking is explicitly controlled by
 `trackOpens` / `trackClicks`, off by default. The producer registers the phase-(c)
 receiver idempotently when the provided Javalin middleware is present.
 
+## Health checks
+
+The producer registers these checks with QQQ central health monitoring:
+
+| Name | Kind | Interval |
+|---|---|---|
+| `email.provider.<id>` (each enabled provider) | DEPENDENCY | 300 seconds |
+| `email.readiness` | DEPENDENCY | 300 seconds |
+
+Both use component `email`, category `EMAIL`, and a 5-second timeout. Provider
+checks read passive delivery state only: HEALTHY maps to UP, UNHEALTHY to DOWN,
+and missing/disabled/unknown state to UNKNOWN. The transport SPI has no
+non-sending connectivity method; these checks never contact providers or send
+mail. Readiness reuses `EmailApi.readiness` for every `EmailApiCategory`; any
+unmet prerequisite is DEGRADED, with only enum names in `failedChecks`. Existing
+passive state and `email.provider.unhealthy` alerts remain in place.
+
+The Email home uses a standard status widget reading the central `health_component`
+rollup, with a link to System Health's checks filtered to `email`. It no longer
+lists provider diagnostics. The host must install central health metadata and its
+schema; central reads use the viewer's health permissions.
+
+This unreleased integration requires the core health SPI currently installed as
+`4.1.0-SNAPSHOT`; the POM's RC.5 pin is unchanged. Verify offline with
+`./mvnw -o verify -Dqqq.snapshot.version=4.1.0-SNAPSHOT` (`mvnw.cmd` on Windows).
+
 ## Sending from another qbit
 
 There are two supported routes. Both queue through the durable outbox; a successful
@@ -434,8 +460,8 @@ return 404. The legacy token covers every To/Cc/Bcc recipient, so use one mailbo
 per opt-out message for individual preferences. Preferences UI remains deferred
 until core #1162 ships in an RC.
 
-The home uses viewer-scoped counts and queries, UTC hour/day charts, provider health
-(admins), and 20 recent messages with masked recipients. No sample data or sampled
+The home uses viewer-scoped counts and queries, UTC hour/day charts, a central
+health status line, and 20 recent messages with masked recipients. No sample data or sampled
 counts are used. Delivered/bounced/complained totals count recipient events and
 use their occurred dates; sent/dead-letter totals count messages.
 
