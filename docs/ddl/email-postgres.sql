@@ -239,3 +239,42 @@ CREATE INDEX email_inbox_due ON email_webhook_inbox (status, next_attempt_date);
 CREATE INDEX email_event_message ON email_event (message_id);
 CREATE INDEX email_event_type_date ON email_event (event_type, occurred_date);
 CREATE INDEX email_message_provider_id ON email_message (provider_id, provider_message_id);
+
+-- Foreign keys (named fk_<table>_<column>), added after every table exists.
+--   CASCADE   owned rows: a provider's sender addresses (the provider delete also removes
+--             them), a message's attempts and events (message retention deletes them first).
+--   RESTRICT  configuration under live data: providers with messages, attempts, events or
+--             webhook inbox rows (disable the provider instead); a brand used by a template;
+--             a template with versions (templates with versions cannot be deleted).
+--   SET NULL  optional pointers: a message's sender address, template, version and brand
+--             (the rendered body is kept); a template's active/approved version (the
+--             cycle with email_template_version.template_id; drafts can be deleted); a
+--             suppression's source message and event, which outlive message retention.
+-- Existing databases: run email-foreign-keys-upgrade.sql.
+ALTER TABLE email_provider_sender_address ADD CONSTRAINT fk_email_provider_sender_address_provider_id FOREIGN KEY (provider_id) REFERENCES email_provider (id) ON DELETE CASCADE;
+ALTER TABLE email_message ADD CONSTRAINT fk_email_message_provider_id FOREIGN KEY (provider_id) REFERENCES email_provider (id) ON DELETE RESTRICT;
+ALTER TABLE email_message ADD CONSTRAINT fk_email_message_from_address_id FOREIGN KEY (from_address_id) REFERENCES email_provider_sender_address (id) ON DELETE SET NULL;
+ALTER TABLE email_message ADD CONSTRAINT fk_email_message_template_id FOREIGN KEY (template_id) REFERENCES email_template (id) ON DELETE SET NULL;
+ALTER TABLE email_message ADD CONSTRAINT fk_email_message_template_version_id FOREIGN KEY (template_version_id) REFERENCES email_template_version (id) ON DELETE SET NULL;
+ALTER TABLE email_message ADD CONSTRAINT fk_email_message_brand_id FOREIGN KEY (brand_id) REFERENCES email_brand (id) ON DELETE SET NULL;
+ALTER TABLE email_message_attempt ADD CONSTRAINT fk_email_message_attempt_message_id FOREIGN KEY (message_id) REFERENCES email_message (id) ON DELETE CASCADE;
+ALTER TABLE email_message_attempt ADD CONSTRAINT fk_email_message_attempt_provider_id FOREIGN KEY (provider_id) REFERENCES email_provider (id) ON DELETE RESTRICT;
+ALTER TABLE email_template ADD CONSTRAINT fk_email_template_brand_id FOREIGN KEY (brand_id) REFERENCES email_brand (id) ON DELETE RESTRICT;
+ALTER TABLE email_template ADD CONSTRAINT fk_email_template_active_version_id FOREIGN KEY (active_version_id) REFERENCES email_template_version (id) ON DELETE SET NULL;
+ALTER TABLE email_template ADD CONSTRAINT fk_email_template_approved_version_id FOREIGN KEY (approved_version_id) REFERENCES email_template_version (id) ON DELETE SET NULL;
+ALTER TABLE email_template_version ADD CONSTRAINT fk_email_template_version_template_id FOREIGN KEY (template_id) REFERENCES email_template (id) ON DELETE RESTRICT;
+ALTER TABLE email_suppression ADD CONSTRAINT fk_email_suppression_source_message_id FOREIGN KEY (source_message_id) REFERENCES email_message (id) ON DELETE SET NULL;
+ALTER TABLE email_suppression ADD CONSTRAINT fk_email_suppression_source_event_id FOREIGN KEY (source_event_id) REFERENCES email_event (id) ON DELETE SET NULL;
+ALTER TABLE email_webhook_inbox ADD CONSTRAINT fk_email_webhook_inbox_provider_id FOREIGN KEY (provider_id) REFERENCES email_provider (id) ON DELETE RESTRICT;
+ALTER TABLE email_event ADD CONSTRAINT fk_email_event_message_id FOREIGN KEY (message_id) REFERENCES email_message (id) ON DELETE CASCADE;
+ALTER TABLE email_event ADD CONSTRAINT fk_email_event_provider_id FOREIGN KEY (provider_id) REFERENCES email_provider (id) ON DELETE RESTRICT;
+CREATE INDEX email_message_from_address ON email_message (from_address_id);
+CREATE INDEX email_message_template ON email_message (template_id);
+CREATE INDEX email_message_template_version ON email_message (template_version_id);
+CREATE INDEX email_message_brand ON email_message (brand_id);
+CREATE INDEX email_template_brand ON email_template (brand_id);
+CREATE INDEX email_template_active_version ON email_template (active_version_id);
+CREATE INDEX email_template_approved_version ON email_template (approved_version_id);
+CREATE INDEX email_suppression_source_message ON email_suppression (source_message_id);
+CREATE INDEX email_suppression_source_event ON email_suppression (source_event_id);
+CREATE INDEX email_event_provider ON email_event (provider_id);
