@@ -44,7 +44,7 @@ unsubscribe and PHI rules.
 
 ## 2. Sending API
 
-### 2.1 `EmailService` (Java, for every consumer)
+### 2.1 `EmailService` (internal Java enqueue service)
 
 ```java
 EmailSendResult result = EmailService.send(new EmailRequest()
@@ -96,8 +96,57 @@ template may set `edit_permission_name` to restrict who edits it (e.g. marketing
 - Attachments are stored through qbit-object-storage when it is installed, else refused with a
   plain message (no blobs in the outbox, nothing on local disk: D11).
 - Callers (qbit-alerts `EmailChannel` and `NotificationEmailer`, qbit-marketing
-  `QqqMessagingEmailTransport`) can switch by configuration at once, then move to `EmailService`
+  `QqqMessagingEmailTransport`) can switch by configuration at once, then move to `EmailApi`
   in phase (d) for templates, categories, idempotency and linked records.
+
+### 2.5 Public API
+
+`com.kingsrook.qbits.email.api.EmailApi` is the sole public qbit-email surface for consuming qbits.
+Changes within a `0.x` minor release line are additive only. Public/protected
+signatures contain only JDK, QQQ core or API-package types; internal packages are
+not API and may change. A reflection test discovers every compiled API class and
+checks signatures, including generic arguments, bounds and nested types.
+
+- `EmailApi.send(EmailApiRequest)` maps to the existing outbox service, preserving
+  permissions, schema/PHI validation, suppression and one-recipient rules. Requests
+  cover recipients/sender selection, body alternatives, template variables and record
+  provenance, category/provider/brand/locale, idempotency, linked records, producer
+  identity, scheduling and caller transactions (`withTransaction(transaction, backendName)`).
+  Results expose message id, enqueue status and reasons.
+- `sendOnce(EmailApiRequest, effectKey)` provides durable handoff through the existing
+  internal effects implementation. The key becomes the request's idempotency key;
+  null requests, missing/blank/over-500-character keys, mismatches and caller transactions
+  are refused. `EmailApiEffectResult` carries `EmailApiEffectOutcome.QUEUED_OR_DUPLICATE`
+  or `REFUSED` and nullable `EmailApiMessage`. Success means committed outbox storage,
+  and replays retain the row and RFC Message-ID. Suppressed audit rows remain refused
+  on replay and return metadata; refusals without a row return null. Operational
+  failures throw `QException`. The deprecated `EmailEffects`, `EmailEffectOutcome` and
+  `EmailMessageRef` remain internal; consumers use this API. See [durable jobs](DURABLE-JOBS.md).
+- `ensureTemplate(EmailApiTemplate)` delegates create-once template registration;
+  `EmailApiVariable` carries the variable contract. Existing content is never
+  overwritten, and the API does not confer PHI approval.
+- `getMessage`, exact `getMessageByIdempotencyKey`/`getMessageByRfcMessageId` and
+  bounded, literal `findMessagesByIdempotencyKeyPrefix` perform
+  system reads of an explicit metadata projection: id/status/category, idempotency
+  key, RFC Message-ID and provider id, template name, linked record and create/sent/delivered dates.
+  Exact-key lookups return empty for null/blank/missing values. RFC lookup requires
+  the exact bracketed header stored at enqueue time, distinct from provider response ids.
+  No recipients, subjects, bodies or snapshots are fetched or returned by lookups.
+  Callers own authorization before presenting metadata to users.
+- `isInstalled`, `defaultProviderName`, `listSenderAddresses` and `readiness` replace
+  consumer access to runtime/configuration/tables. Readiness checks an enabled
+  default provider; MARKETING also needs a valid publicBaseUrl, available unsubscribe
+  key and default brand postal address. The PHI overload checks body key availability
+  and provider PHI/tracking policy. Reasons never contain resolved secret values.
+  PHI is a template state, so it is an explicit option rather than a fifth category.
+- Database operations use the current `QContext`; an installed instance argument
+  must match that context. Database errors remain core `QException`. Readiness does
+  not validate an individual request or guarantee delivery.
+
+For simple subject/body sends, consumers need no qbit-email dependency: use core
+`SendMessageAction` with `messagingProviderName = "qbitEmail"` (or the host's
+configured bridge name). Use the API package for templates, idempotency, links and
+lookups. Both routes enqueue; neither sends inline.
 
 ## 3. Providers and transports
 

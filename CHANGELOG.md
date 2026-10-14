@@ -6,6 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- `EmailApi.sendOnce` as the public durable-effect handoff, with API-only outcome/result types, committed enqueue/replay semantics and suppression/transaction refusal parity. Exact idempotency-key and RFC Message-ID lookups return `EmailApiMessage`, which now includes `rfcMessageId` across all lookup routes. Public requests support ordinary caller transactions; `EmailEffects`, `EmailEffectOutcome` and `EmailMessageRef` are deprecated internals. H2 parity, reconciliation, storage-failure and API-boundary coverage; no new dependencies.
+- Stable `com.kingsrook.qbits.email.api` contract for cross-qbit sends, create-once templates, metadata-only message lookups, enabled sender addresses, default provider selection and secret-safe readiness (including marketing and PHI prerequisites). JDK/QQQ-only signatures, complete request/status mapping tests and a reflection package-boundary guard; no new dependencies.
+- Documented both supported cross-qbit routes: core-only `SendMessageAction` via `qbitEmail`, and the public API for richer sends and lookups.
 - Persisted unique RFC Message-IDs, stable across delivery attempts, with SMTP/Gmail SMTP, SES raw MIME and Postmark/SendGrid/Mailgun request propagation (SES replaces the header downstream).
 - Core-independent `EmailEffects` handoff, reference lookups by idempotency key or RFC Message-ID, refusal mapping and an RC.7 binding design sketch; offline retry and provider-contract tests.
 - Checkstyle now checks test sources as well as main sources; existing test imports and formatting corrected.

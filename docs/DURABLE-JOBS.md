@@ -50,16 +50,18 @@ and [SES header replacement](https://docs.aws.amazon.com/ses/latest/APIReference
 
 ## Handoff and reconcile
 
-`EmailEffects.send(request, effectIdempotencyKey)` sets the request's key, refusing
-a different pre-existing key, a missing/blank/overlength effect key, a null request
+`EmailApi.sendOnce(EmailApiRequest request, String effectKey)` sets the request's key, refusing
+a different pre-existing key, a missing/blank/over-500-character effect key, a null request
 or a caller transaction. The service performs its usual validation and send
 permission checks. Success is returned only after the outbox transaction commits;
-there is no transport call here. Use ordinary `EmailService.send` for caller-owned
-or cross-backend deferred transactions.
+there is no transport call here. Use ordinary `EmailApi.send` with
+`request.withTransaction(transaction, backendName)` for caller-owned or cross-backend
+deferred transactions. `sendOnce` refuses either kind of caller transaction.
 
-`EmailEffects.Result(outcome, message)` contains an `EmailEffectOutcome` and a
-nullable `EmailMessageRef(Integer id, String status, String rfcMessageId,
-String providerMessageId)`:
+`EmailApiEffectResult(outcome, message)` contains an `EmailApiEffectOutcome` and a
+nullable `EmailApiMessage` with the outbox id, current delivery status, RFC Message-ID,
+provider reference and other metadata. All these types are in
+`com.kingsrook.qbits.email.api`, the sole public qbit-email surface:
 
 - `QUEUED_OR_DUPLICATE`: one committed row accepted the handoff, including replays.
 - `REFUSED`: invalid or suppressed request. A suppressed audit row has a reference;
@@ -68,11 +70,15 @@ String providerMessageId)`:
 - Database/query failures throw `QException`; callers must retry or reconcile,
   never turn an uncertain outcome into a permanent refusal.
 
-`findByIdempotencyKey(key)` and `findByRfcMessageId(messageId)` return
-`Optional<EmailMessageRef>` from system reads, like other internal outbox reads.
+`EmailApi.getMessageByIdempotencyKey(key)` and `EmailApi.getMessageByRfcMessageId(messageId)`
+return `Optional<EmailApiMessage>` from system reads of an explicit metadata projection.
 They return empty for null/blank/missing values. These are trusted backend APIs,
 not viewer-scoped public endpoints. Lookups reflect current status and provider
-reference and do not expose bodies, recipients or variables.
+reference and do not expose bodies, recipients or variables. `EmailApi.getMessage(id)`
+and `EmailApi.findMessagesByIdempotencyKeyPrefix(prefix, limit)` return the same projection,
+including `rfcMessageId`. Callers must authorize exposing this metadata to their users.
+`EmailEffects`, `EmailEffectOutcome` and `EmailMessageRef` are deprecated internal
+implementation types; consuming qbits use `EmailApi`.
 
 The effect's `SENT` means successful durable handoff, not mailbox delivery. The
 email dispatcher owns later delivery/retry failures. Reconcile acknowledges an
@@ -83,7 +89,7 @@ at least the maximum effect retry/reconciliation horizon.
 ## RC.7 binding design note (not compiled)
 
 Mapping: `deliver -> QUEUED_OR_DUPLICATE => SENT(ref.id)`, `REFUSED => FAILED`;
-`reconcile -> findByIdempotencyKey present => FOUND(ref.id), absent => NOT_FOUND`.
+`reconcile -> getMessageByIdempotencyKey present => FOUND(ref.id), absent => NOT_FOUND`.
 Exceptions escape to core's retry/unknown handling. Payload decoding must preserve
 the existing PHI/variable policies and must not attach a caller transaction.
 
@@ -98,9 +104,9 @@ final class EmailJobEffectTarget implements EffectTarget
    @Override
    public DeliveryResult deliver(Effect effect) throws Exception
    {
-      EmailRequest request = decode(effect.payload());
-      EmailEffects.Result result = EmailEffects.send(request, effect.idempotencyKey());
-      if(result.outcome() == EmailEffectOutcome.REFUSED)
+      EmailApiRequest request = decode(effect.payload());
+      EmailApiEffectResult result = EmailApi.sendOnce(request, effect.idempotencyKey());
+      if(result.outcome() == EmailApiEffectOutcome.REFUSED)
       {
          return (DeliveryResult.failed("Email refused"));
       }
@@ -111,7 +117,7 @@ final class EmailJobEffectTarget implements EffectTarget
    @Override
    public ReconcileResult reconcile(Effect effect) throws Exception
    {
-      return (EmailEffects.findByIdempotencyKey(effect.idempotencyKey())
+      return (EmailApi.getMessageByIdempotencyKey(effect.idempotencyKey())
          .map(ref -> ReconcileResult.found(ref.id().toString()))
          .orElseGet(ReconcileResult::notFound));
    }
