@@ -26,10 +26,10 @@
       <maven.compiler.source>21</maven.compiler.source>
       <maven.compiler.target>21</maven.compiler.target>
       <jacoco.version>0.8.15</jacoco.version>
-      <h2.version>2.2.224</h2.version>
-      <commonmark.version>0.27.1</commonmark.version>
-      <awssdk.version>2.41.34</awssdk.version>
-      <greenmail.version>2.0.1</greenmail.version>
+      <h2.version>2.5.252</h2.version>
+      <commonmark.version>0.30.1</commonmark.version>
+      <awssdk.version>2.55.14</awssdk.version>
+      <greenmail.version>2.1.14</greenmail.version>
    </properties>
 
    <parent>
@@ -159,7 +159,7 @@
          <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-checkstyle-plugin</artifactId>
-            <version>3.3.1</version>
+            <version>3.6.0</version>
             <dependencies>
                <dependency>
                   <groupId>com.puppycrawl.tools</groupId>
