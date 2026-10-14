@@ -20,14 +20,24 @@
 
 package com.kingsrook.qbits.email;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 import com.kingsrook.qbits.email.app.EmailApp;
-import com.kingsrook.qbits.email.metadata.*;
-import com.kingsrook.qbits.email.outbox.*;
-import com.kingsrook.qbits.email.permissions.*;
-import com.kingsrook.qbits.email.processes.*;
-import com.kingsrook.qbits.email.support.*;
-import com.kingsrook.qqq.backend.core.actions.tables.*;
+import com.kingsrook.qbits.email.metadata.EmailTableCustomizers;
+import com.kingsrook.qbits.email.metadata.EmailTables;
+import com.kingsrook.qbits.email.outbox.AdHocEmailRenderer;
+import com.kingsrook.qbits.email.outbox.EmailRequest;
+import com.kingsrook.qbits.email.outbox.EmailSendResult;
+import com.kingsrook.qbits.email.outbox.EmailService;
+import com.kingsrook.qbits.email.permissions.EmailPermissionChecker;
+import com.kingsrook.qbits.email.processes.EmailProcesses;
+import com.kingsrook.qbits.email.support.EmailStore;
+import com.kingsrook.qbits.email.support.SystemWrites;
+import com.kingsrook.qqq.backend.core.actions.tables.DeleteAction;
+import com.kingsrook.qqq.backend.core.actions.tables.InsertAction;
+import com.kingsrook.qqq.backend.core.actions.tables.QueryAction;
+import com.kingsrook.qqq.backend.core.actions.tables.UpdateAction;
 import com.kingsrook.qqq.backend.core.context.QContext;
 import com.kingsrook.qqq.backend.core.model.actions.tables.delete.DeleteInput;
 import com.kingsrook.qqq.backend.core.model.actions.tables.insert.InsertInput;
@@ -36,10 +46,14 @@ import com.kingsrook.qqq.backend.core.model.actions.tables.query.QueryInput;
 import com.kingsrook.qqq.backend.core.model.actions.tables.update.UpdateInput;
 import com.kingsrook.qqq.backend.core.model.data.QRecord;
 import com.kingsrook.qqq.backend.core.model.metadata.QInstance;
-import com.kingsrook.qqq.backend.core.model.metadata.fields.*;
+import com.kingsrook.qqq.backend.core.model.metadata.fields.QFieldMetaData;
+import com.kingsrook.qqq.backend.core.model.metadata.fields.QFieldType;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.Capability;
-import org.junit.jupiter.api.*;
-import static org.assertj.core.api.Assertions.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /*******************************************************************************
  ** Email Metadata Test.
@@ -412,7 +426,7 @@ class EmailMetadataTest
                   "MAILGUN",
                   "GMAIL_API",
                   "future"))
-                  {
+      {
          assertThat(
                      new EmailQBitConfig()
                            .withAllowedEnvNames(Set.of("CUSTOM"))

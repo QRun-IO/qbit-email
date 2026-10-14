@@ -109,7 +109,7 @@ class EmailReviewFixesTest
       var schema = new VariableSchema("[{\"name\":\"items\",\"type\":\"LIST\"},{\"name\":\"value\",\"type\":\"STRING\"}]");
       var loop = engine.parse("{{#each items}}{{#each items}}{{/each}}{{/each}}", schema);
       assertThatThrownBy(() -> loop.render(Map.of("items", Collections.nCopies(100, "")), EmailTemplateEngine.Context.TEXT)).hasMessage("Template output is too large");
-      assertThatThrownBy(() -> engine.parse("{{value}}", schema).render(Map.of("value", "\u00e9".repeat(600_000)), EmailTemplateEngine.Context.TEXT))
+      assertThatThrownBy(() -> engine.parse("{{value}}", schema).render(Map.of("value", "é".repeat(600_000)), EmailTemplateEngine.Context.TEXT))
          .hasMessage("Template output is too large");
       assertThat(engine.parse("{{#if value}}".repeat(8) + "ok" + "{{/if}}".repeat(8), schema).render(Map.of("value", true), EmailTemplateEngine.Context.TEXT)).isEqualTo("ok");
       assertThatThrownBy(() -> engine.parse("{{#if value}}".repeat(9) + "{{/if}}".repeat(9), schema)).hasMessageContaining("8 levels");
@@ -179,7 +179,10 @@ class EmailReviewFixesTest
       {
          assertThatThrownBy(() -> EmailTemplateEngine.validateHtml(source)).hasMessageContaining("must be quoted");
       }
-      EmailRuntime.config().withMjmlCompiler(source -> { throw new AssertionError("Unsafe MJML reached compiler"); });
+      EmailRuntime.config().withMjmlCompiler(source ->
+      {
+         throw new AssertionError("Unsafe MJML reached compiler");
+      });
       QRecord mjml = EmailTemplatesTest.draft("includes", "MJML", "[]", "{}", "<mjml><mj-include path='secret'/></mjml>");
       assertThatThrownBy(() -> EmailVersions.activate(mjml.getValueInteger("id"))).hasMessage("MJML includes are not allowed");
       assertThat(preview(mjml)).contains("MJML includes are not allowed");
@@ -192,7 +195,10 @@ class EmailReviewFixesTest
    void viewerNeverCompiles() throws Exception
    {
       QRecord version = EmailTemplatesTest.draft("viewer", "MJML", "[]", "{}", "<mjml/>");
-      EmailRuntime.config().withMjmlCompiler(source -> { throw new AssertionError("Viewer compiled MJML"); });
+      EmailRuntime.config().withMjmlCompiler(source ->
+      {
+         throw new AssertionError("Viewer compiled MJML");
+      });
       QContext.getQSession().setPermissions(Set.of("email.view"));
       assertThat(preview(version)).contains("Not compiled yet. Activate the version or use Preview as a manager.");
       QContext.getQSession().setPermissions(Set.of("email.manage"));
@@ -270,7 +276,10 @@ class EmailReviewFixesTest
       QRecord original = EmailStore.get(EmailTables.MESSAGE, first.messageId(), null);
       SystemWrites.updateOne(EmailTables.MESSAGE, new QRecord().withValue("id", second.messageId()).withValue("htmlBody", original.getValue("htmlBody")));
       var dispatcher = new com.kingsrook.qbits.email.delivery.EmailDispatcher(new com.kingsrook.qbits.email.transport.EmailTransportRegistry()
-         .withTransport("SMTP", (envelope, settings) -> { throw new AssertionError("Swapped ciphertext reached transport"); }));
+         .withTransport("SMTP", (envelope, settings) ->
+         {
+            throw new AssertionError("Swapped ciphertext reached transport");
+         }));
       assertThat(dispatcher.sendNow(second.messageId())).isEqualTo(com.kingsrook.qbits.email.delivery.EmailDispatcher.SendResult.RETRY_WAIT);
    }
 

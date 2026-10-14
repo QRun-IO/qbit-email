@@ -6,6 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- Persisted unique RFC Message-IDs, stable across delivery attempts, with SMTP/Gmail SMTP, SES raw MIME and Postmark/SendGrid/Mailgun request propagation (SES replaces the header downstream).
+- Core-independent `EmailEffects` handoff, reference lookups by idempotency key or RFC Message-ID, refusal mapping and an RC.7 binding design sketch; offline retry and provider-contract tests.
+- Checkstyle now checks test sources as well as main sources; existing test imports and formatting corrected.
 - Provider sender addresses: child table `email_provider_sender_address` (validated lowercase address, display name, one default, enabled, note; unique per provider; domain bound to the provider's sending domain; admin-only), shown on the provider record. `EmailRequest.withFromAddressId`, `from_address_id` on messages, refusal of a from address that is not an enabled row of the resolved provider, and the provider `from_address` / `from_name` kept as the fallback.
 - Contingent possible-value filters on the new from-address pickers (send processes by `providerId`, Send Test Email by the acted-on provider, message `fromAddressId` by `providerId`) and on the attempt and event message pickers (by `providerId`) and the suppression source event (by `sourceMessageId`); the send processes also take `providerId`.
 - Phase (c): authenticated SNS, Postmark, SendGrid and Mailgun webhooks, durable inbox deduplication and Mailgun nonce replay protection; configurable Javalin routes.

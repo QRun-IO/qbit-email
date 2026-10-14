@@ -50,6 +50,9 @@ import software.amazon.awssdk.services.sesv2.model.SesV2Exception;
 
 /*******************************************************************************
  ** SES v2 raw MIME transport; credentials are resolved only for an attempt.
+ ** The raw request carries the stored Message-ID, but SES replaces it downstream.
+ ** Receiver deduplication by that header is unavailable with SES; X-QQQ-Email-Id
+ ** remains the application correlation header. See docs/DURABLE-JOBS.md.
  *******************************************************************************/
 public class SesEmailTransport implements EmailTransport
 {

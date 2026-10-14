@@ -30,6 +30,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
 import com.kingsrook.qbits.email.EmailQBitConfig;
 import com.kingsrook.qbits.email.EmailRuntime;
 import com.kingsrook.qbits.email.metadata.EmailTableCustomizers;
@@ -261,6 +262,7 @@ public final class EmailService
          .withValue("htmlBody", rendered.html()).withValue("textBody", rendered.text()).withValue("bodySha256", digest(rendered))
          .withValue("brandId", adHocBrand == null ? null : adHocBrand.getValue("id"))
          .withValue("category", category.name()).withValue("locale", request.getLocale()).withValue("idempotencyKey", request.getIdempotencyKey())
+         .withValue("rfcMessageId", messageId(request.getIdempotencyKey(), from))
          .withValue("linkedTableName", request.getLinkedTableName()).withValue("linkedRecordId", request.getLinkedRecordId())
          .withValue("senderQbit", request.getSenderQbit()).withValue("senderProcess", request.getSenderProcess())
          .withValue("sendAfter", request.getSendAfter()).withValue("nextAttemptDate", request.getSendAfter() == null ? now : request.getSendAfter())
@@ -391,18 +393,10 @@ public final class EmailService
       {
          return (new EmailSendResult(existing.getValueInteger("id"), EmailSendResult.Status.DUPLICATE, List.of()));
       }
-      QRecord inserted;
-      try
-      {
-         inserted = SystemWrites.insert(EmailTables.MESSAGE, List.of(row), transaction).getRecords().get(0);
-      }
-      catch(QException e)
-      {
-         return (refused("Could not queue the email message"));
-      }
+      QRecord inserted = SystemWrites.insert(EmailTables.MESSAGE, List.of(row), transaction).getRecords().get(0);
       if(inserted.getErrors() != null && !inserted.getErrors().isEmpty())
       {
-         return (refused("Could not queue the email message"));
+         throw (new QException("Could not queue the email message"));
       }
       try
       {
@@ -595,6 +589,42 @@ public final class EmailService
          throw (new IllegalStateException("SHA-256 unavailable"));
       }
    }
+
+
+
+   /*******************************************************************************
+    ** Create once before insertion. A UUID seeds messages without an idempotency key.
+    ** The mailbox parser ignores display names; malformed domains use a local fallback.
+    *******************************************************************************/
+   static String messageId(String key, String from)
+   {
+      String domain = "qbit-email.local";
+      try
+      {
+         String address = new InternetAddress(from).getAddress();
+         String candidate = address.substring(address.lastIndexOf('@') + 1);
+         if(address.contains("@") && candidate.matches("[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*"))
+         {
+            domain = candidate.toLowerCase(Locale.ROOT);
+         }
+      }
+      catch(Exception e)
+      {
+         // A fallback also supports callers preparing legacy message rows.
+      }
+      try
+      {
+         String seed = key == null ? "qbit-email:" + UUID.randomUUID() : key;
+         String token = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(seed.getBytes(StandardCharsets.UTF_8))).substring(0, 32);
+         return ("<" + token + "@" + domain + ">");
+      }
+      catch(java.security.NoSuchAlgorithmException e)
+      {
+         throw (new IllegalStateException("SHA-256 unavailable"));
+      }
+   }
+
+
 
    /*******************************************************************************
     ** Refusal with no stored row.

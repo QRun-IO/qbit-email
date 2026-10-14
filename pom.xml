@@ -168,7 +168,7 @@
                <failsOnError>false</failsOnError>
                <failOnViolation>true</failOnViolation>
                <violationSeverity>warning</violationSeverity>
-               <includeTestSourceDirectory>false</includeTestSourceDirectory>
+               <includeTestSourceDirectory>true</includeTestSourceDirectory>
             </configuration>
             <executions>
                <execution>

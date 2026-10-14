@@ -75,6 +75,7 @@ CREATE TABLE email_message (
    phi_approved BOOLEAN,
    unsubscribe_url TEXT,
    idempotency_key VARCHAR(500),
+   rfc_message_id VARCHAR(500),
    provider_id INTEGER,
    provider_message_id VARCHAR(500),
    attempt_count INTEGER,
@@ -93,7 +94,8 @@ CREATE TABLE email_message (
    sender_process VARCHAR(500),
    suppressed_addresses TEXT,
    send_after TIMESTAMP,
-   UNIQUE (idempotency_key)
+   UNIQUE (idempotency_key),
+   UNIQUE (rfc_message_id)
 );
 
 CREATE TABLE email_message_attempt (

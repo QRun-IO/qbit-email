@@ -269,6 +269,7 @@ public final class EmailTables
          .withField(field("unsubscribeUrl", QFieldType.TEXT))
          .withField(field("bodySha256", QFieldType.STRING).withMaxLength(500))
          .withField(field("idempotencyKey", QFieldType.STRING).withMaxLength(500))
+         .withField(field("rfcMessageId", QFieldType.STRING).withMaxLength(500))
          .withField(field("providerId", QFieldType.INTEGER).withPossibleValueSourceName(PROVIDER))
          .withField(field("providerMessageId", QFieldType.STRING).withMaxLength(500))
          .withField(field("attemptCount", QFieldType.INTEGER).withDefaultValue(0))
@@ -291,8 +292,9 @@ public final class EmailTables
       table.withRecordLabelFormat(null).withRecordLabelFields(List.of());
       table.getField("subject").setIsHeavy(false);
       table.withUniqueKey(new UniqueKey("idempotencyKey"));
+      table.withUniqueKey(new UniqueKey("rfcMessageId"));
       table.withSection(SectionFactory.defaultT1("id", "status", "toAddresses", "ccAddresses", "bccAddresses", "fromAddress"));
-      table.withSection(SectionFactory.defaultT2("fromAddressId", "replyTo", "subject", "templateId", "templateVersionId", "brandId", "category", "locale", "variablesSnapshot", "htmlBody", "textBody", "phiApproved", "unsubscribeUrl", "bodySha256", "idempotencyKey", "providerId", "providerMessageId", "attemptCount", "nextAttemptDate", "leaseExpiresDate", "lastError", "finishedDate", "sentDate", "deliveredDate", "bouncedDate", "complainedDate", "deadLetterDate", "linkedTableName", "linkedRecordId", "senderQbit", "senderProcess", "suppressedAddresses", "sendAfter"));
+      table.withSection(SectionFactory.defaultT2("fromAddressId", "replyTo", "subject", "templateId", "templateVersionId", "brandId", "category", "locale", "variablesSnapshot", "htmlBody", "textBody", "phiApproved", "unsubscribeUrl", "bodySha256", "idempotencyKey", "rfcMessageId", "providerId", "providerMessageId", "attemptCount", "nextAttemptDate", "leaseExpiresDate", "lastError", "finishedDate", "sentDate", "deliveredDate", "bouncedDate", "complainedDate", "deadLetterDate", "linkedTableName", "linkedRecordId", "senderQbit", "senderProcess", "suppressedAddresses", "sendAfter"));
       table.withSection(SectionFactory.defaultT3("createDate", "modifyDate"));
       table.withSection(SectionFactory.customT2("children", new QIcon("list")).withLabel("Attempts").withWidgetName(MESSAGE + "_children"));
       table.withSection(SectionFactory.customT2("events", new QIcon("list")).withLabel("Events").withWidgetName(EVENT + "_children"));
