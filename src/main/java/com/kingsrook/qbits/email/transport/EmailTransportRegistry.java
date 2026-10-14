@@ -33,13 +33,16 @@ public class EmailTransportRegistry
    private final Map<String, EmailTransport> transports = new HashMap<>();
 
    /*******************************************************************************
-    ** Install the phase (a) transports.
+    ** Install the outbound transports.
     *******************************************************************************/
    public EmailTransportRegistry()
    {
       transports.put("SMTP", new SmtpEmailTransport());
       transports.put("GMAIL_SMTP", new SmtpEmailTransport());
       transports.put("SES", new SesEmailTransport());
+      transports.put("POSTMARK", new PostmarkEmailTransport());
+      transports.put("SENDGRID", new SendGridEmailTransport());
+      transports.put("MAILGUN", new MailgunEmailTransport());
    }
 
    /*******************************************************************************
@@ -59,7 +62,8 @@ public class EmailTransportRegistry
       EmailTransport transport = transports.get(kind);
       if(transport == null)
       {
-         throw (new EmailTransportException("Provider transport not available until phase (b)", true));
+         throw (new EmailTransportException("GMAIL_API".equals(kind)
+            ? "Gmail API sending is specified but not built; use GMAIL_SMTP" : "Unknown email provider kind", true));
       }
       return (transport);
    }
