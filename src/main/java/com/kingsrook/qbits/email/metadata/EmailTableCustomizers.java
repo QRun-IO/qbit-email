@@ -77,6 +77,37 @@ public final class EmailTableCustomizers
    {
       List<String> errors = new ArrayList<>();
       String kind = row.getValueString("kind");
+      if("GMAIL_API".equals(kind))
+      {
+         errors.add("Gmail API sending is specified but not built; use GMAIL_SMTP");
+      }
+      if(List.of("POSTMARK", "SENDGRID", "MAILGUN", "GMAIL_SMTP").contains(kind == null ? "" : kind)
+         && (row.getValueString("secretEnvName") == null || row.getValueString("secretEnvName").isBlank()))
+      {
+         errors.add("Provider needs a secret environment name");
+      }
+      if("GMAIL_SMTP".equals(kind))
+      {
+         if(row.getValueString("usernameEnvName") == null || row.getValueString("usernameEnvName").isBlank())
+         {
+            errors.add("Gmail SMTP needs an account address environment name");
+         }
+         if(row.getValueString("security") != null && !"STARTTLS".equals(row.getValueString("security")))
+         {
+            errors.add("Gmail SMTP requires STARTTLS");
+         }
+      }
+      if("MAILGUN".equals(kind))
+      {
+         if(!EmailProviderSettings.validSendingDomain(row.getValueString("sendingDomain")))
+         {
+            errors.add("Mailgun needs a valid sending domain");
+         }
+         if(!List.of("US", "EU").contains(row.getValueString("region") == null ? "" : row.getValueString("region")))
+         {
+            errors.add("Mailgun region must be US or EU");
+         }
+      }
       if(("SMTP".equals(kind) || "GMAIL_SMTP".equals(kind))
          && !new EmailProviderSettings(row, config).allowsSmtpAuth())
       {

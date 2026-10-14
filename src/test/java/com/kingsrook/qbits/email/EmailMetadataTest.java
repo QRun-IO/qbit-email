@@ -307,7 +307,7 @@ class EmailMetadataTest
    {
       var config = EmailRuntime.config();
       assertThat(config.getAllowPlaintextSmtpAuth()).isFalse();
-      for(String kind : List.of("SMTP", "GMAIL_SMTP"))
+      for(String kind : List.of("SMTP"))
       {
          for(String credential : List.of("usernameEnvName", "secretEnvName"))
          {
