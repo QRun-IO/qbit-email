@@ -24,6 +24,7 @@ package com.kingsrook.qbits.email.app;
 import java.util.List;
 import java.util.Map;
 import com.kingsrook.qbits.email.EmailQBitConfig;
+import com.kingsrook.qbits.email.health.EmailHealthWidget;
 import com.kingsrook.qbits.email.metadata.EmailTables;
 import com.kingsrook.qqq.backend.core.actions.dashboard.widgets.AbstractWidgetRenderer;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
@@ -64,6 +65,7 @@ public final class EmailApp
    {
       return (List.of(
          widget(HOME_WIDGET, "Overview", WidgetType.HTML.getType(), HomeRenderer.class),
+         widget("emailHealth", "Email health", WidgetType.STATISTICS.getType(), EmailHealthWidget.class),
          widget("emailTemplatePreview", "Preview", WidgetType.HTML.getType(), com.kingsrook.qbits.email.template.EmailPreviewWidget.class)));
 
    }
@@ -80,7 +82,7 @@ public final class EmailApp
          .withLabel(config.getAppLabel())
          .withIcon(new QIcon("mail"))
          .withPermissionRules(EmailTables.permissionRules())
-         .withWidgets(List.of(HOME_WIDGET));
+         .withWidgets(List.of("emailHealth", HOME_WIDGET));
       for(String name : EmailTables.MAIN)
       {
          if(tables.containsKey(name))

@@ -108,8 +108,8 @@ class EmailHomePolishTest
          assertThat(tiles.get(i).child(0).attr("style")).contains("font-size:1.6rem");
          assertThat(tiles.get(i).child(0).attr("style").contains("#d64545")).isEqualTo(i == 2 || i == 3);
       }
-      assertThat(document.select("h3")).extracting(Element::text).containsExactly("Sends per hour, last 24 hours", "Provider health", "Recent messages", "Suppressions added, last 30 days");
-      assertThat(QContext.getQInstance().getApp("email").getWidgets()).containsExactly("emailHome");
+      assertThat(document.select("h3")).extracting(Element::text).containsExactly("Sends per hour, last 24 hours", "Recent messages", "Suppressions added, last 30 days");
+      assertThat(QContext.getQInstance().getApp("email").getWidgets()).containsExactly("emailHealth", "emailHome");
    }
 
    /*******************************************************************************
@@ -147,7 +147,7 @@ class EmailHomePolishTest
     ** Twenty newest linked rows wrap long text, mask addresses, and hide PHI.
     *******************************************************************************/
    @Test
-   void recentRowsAndProviderHealth() throws Exception
+   void recentRowsExcludeProviderDiagnostics() throws Exception
    {
       for(int i = 0; i < 21; i++)
       {
@@ -165,13 +165,12 @@ class EmailHomePolishTest
       assertThat(rows.first().attr("href")).isEqualTo("/app/email_message/21");
       assertThat(rows.last().attr("href")).isEqualTo("/app/email_message/2");
       assertThat(rows.first().text()).contains("When", "To", "Subject", "Status", "Waiting to retry");
-      assertThat(html).contains("Secure message", "p***@", "Oct 14, 02:12 UTC", "Unhealthy", "&lt;broken&gt;", "min-width:0", "overflow-wrap:anywhere")
-         .doesNotContain("private-canary", "Person &lt;", "RETRY_WAIT", "2026-10-14T");
-      assertThat(document.select("section").get(1).text()).contains("Last success Oct 14, 02:12 UTC", "Per-minute headroom 1");
+      assertThat(html).contains("Secure message", "p***@", "min-width:0", "overflow-wrap:anywhere")
+         .doesNotContain("private-canary", "Person &lt;", "RETRY_WAIT", "2026-10-14T", "Provider health", "&lt;broken&gt;", "Per-minute headroom");
       SystemWrites.updateOne(EmailTables.PROVIDER, new QRecord().withValue("id", 1).withValue("enabled", false).withValue("maxPerMinute", null));
-      assertThat(EmailHome.overview().getHtml()).contains("Disabled", "No limit");
+      assertThat(EmailHome.overview().getHtml()).doesNotContain("Disabled", "No limit", "Provider health");
       QContext.getQSession().setPermissions(Set.of("email.view"));
-      assertThat(EmailHome.overview().getHtml()).contains("Provider health needs email.admin").doesNotContain("&lt;broken&gt;");
+      assertThat(EmailHome.overview().getHtml()).doesNotContain("Provider health", "&lt;broken&gt;");
    }
 
    /*******************************************************************************
