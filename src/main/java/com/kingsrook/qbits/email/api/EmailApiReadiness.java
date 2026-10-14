@@ -21,13 +21,15 @@
 package com.kingsrook.qbits.email.api;
 
 
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 
 
 /*******************************************************************************
  ** Configuration preflight, not a delivery guarantee. Reasons never contain secret values.
  *******************************************************************************/
-public record EmailApiReadiness(boolean ready, List<String> reasons)
+public record EmailApiReadiness(boolean ready, List<String> reasons, Set<EmailApiReadinessCheck> failedChecks)
 {
    /*******************************************************************************
     ** Copy configuration reasons.
@@ -35,5 +37,16 @@ public record EmailApiReadiness(boolean ready, List<String> reasons)
    public EmailApiReadiness
    {
       reasons = List.copyOf(reasons);
+      failedChecks = failedChecks == null || failedChecks.isEmpty() ? Set.of() : Set.copyOf(EnumSet.copyOf(failedChecks));
+   }
+
+
+
+   /*******************************************************************************
+    ** Whether a specific prerequisite failed.
+    *******************************************************************************/
+   public boolean failed(EmailApiReadinessCheck check)
+   {
+      return (failedChecks.contains(check));
    }
 }

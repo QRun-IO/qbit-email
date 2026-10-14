@@ -499,11 +499,14 @@ class EmailApiTest
    void reportsReadinessAndPhiPrerequisites() throws Exception
    {
       assertThat(EmailApi.readiness(null, null).reasons()).containsExactly("Email qbit is not installed");
+      assertThat(EmailApi.readiness(null, null).failedChecks()).containsExactly(EmailApiReadinessCheck.NOT_INSTALLED);
       assertThat(EmailApi.readiness(instance, null).ready()).isTrue();
       EmailApiReadiness marketing = EmailApi.readiness(instance, EmailApiCategory.MARKETING);
       assertThat(marketing.ready()).isFalse();
       assertThat(marketing.reasons()).hasSize(3);
       assertThat(String.join(";", marketing.reasons())).contains("publicBaseUrl", "QQQ_EMAIL_UNSUBSCRIBE_KEY", "postal address");
+      assertThat(marketing.failedChecks()).containsExactlyInAnyOrder(EmailApiReadinessCheck.PUBLIC_BASE_URL, EmailApiReadinessCheck.UNSUBSCRIBE_KEY, EmailApiReadinessCheck.BRAND_POSTAL_ADDRESS);
+      assertThat(marketing.failed(EmailApiReadinessCheck.PROVIDER_MISSING)).isFalse();
       EmailQBitConfig config = EmailRuntime.config();
       config.withPublicBaseUrl("https://app.example.com").withSecretResolver(name -> "synthetic-test-key");
       QRecord brand = SystemWrites.insertOne(EmailTables.BRAND, new QRecord().withValue("name", "default").withValue("label", "Default").withValue("isDefault", true));
@@ -522,6 +525,7 @@ class EmailApiTest
       EmailApiReadiness phi = EmailApi.readiness(instance, EmailApiCategory.TRANSACTIONAL, true);
       assertThat(phi.reasons()).hasSize(2);
       assertThat(String.join(";", phi.reasons())).contains("QQQ_EMAIL_BODY_KEY", "PHI-enabled").doesNotContain("DO_NOT_EXPOSE");
+      assertThat(phi.failedChecks()).containsExactlyInAnyOrder(EmailApiReadinessCheck.BODY_KEY, EmailApiReadinessCheck.PHI_PROVIDER);
       config.withSecretResolver(name -> " ");
       assertThat(EmailApi.readiness(instance, EmailApiCategory.SECURITY, true).ready()).isFalse();
       config.withSecretResolver(name -> "synthetic-test-key");
