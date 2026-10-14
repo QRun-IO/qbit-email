@@ -91,6 +91,12 @@ class EmailHomePolishTest
          .withValue("sentDate", NOW.minusSeconds(86400)).withValue("deliveredDate", NOW.plusSeconds(1))
          .withValue("deadLetterDate", NOW).withValue("bouncedDate", NOW.minusSeconds(7 * 86400))
          .withValue("complainedDate", NOW.minusSeconds(7 * 86400 + 1)));
+      for(String type : List.of("DELIVERED", "BOUNCED", "COMPLAINED"))
+      {
+         SystemWrites.insertOne(EmailTables.EVENT, new QRecord().withValue("messageId", 1).withValue("eventType", type).withValue("eventKey", type)
+            .withValue("occurredDate", "DELIVERED".equals(type) ? NOW.plusSeconds(1)
+               : NOW.minusSeconds(7 * 86400 + ("COMPLAINED".equals(type) ? 1 : 0))));
+      }
       H2Support.insert(EmailTables.SUPPRESSION, new QRecord().withValue("address", "a@example.test").withValue("scope", "ALL").withValue("reason", "MANUAL"));
       var document = Jsoup.parse(EmailHome.overview().getHtml());
       var tiles = document.select("body > div > div > div");

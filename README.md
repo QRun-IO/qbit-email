@@ -4,9 +4,9 @@ One email service for a QQQ system: a durable outbox (`email_message`) with retr
 letters, idempotency keys, rate limits and provider health; SMTP, Amazon SES, Postmark,
 SendGrid, Mailgun and Gmail SMTP transports; versioned Markdown, HTML and MJML templates with
 dark-mode-safe branding; classified variables and PHI protection; preview widgets; a
-real-data home; and the core messaging bridge. Every send goes through the outbox.
+real-data home; delivery events, suppression and one-click unsubscribe; and the core messaging bridge. Every send goes through the outbox.
 
-The [design](docs/DESIGN.md) also covers delivery tracking, unsubscribe, Preferences, the
+The [design](docs/DESIGN.md) also specifies the deferred Preferences UI (core #1162),
 consumer migrations and inbound mail. Preview uses the standard widget endpoint; the
 dedicated preview API arrives with QQQ RC.6. Attachments are refused until
 qbit-object-storage is wired in.
@@ -45,6 +45,8 @@ in a static variable.
 |---|---|---|
 | `email_message` | Messages | Qbit only; people use record actions |
 | `email_message_attempt` | Attempts on a message | Qbit only |
+| `email_event` | Events on a message | Qbit only; readable with `email.view` |
+| `email_webhook_inbox` | Inbox on a provider | Qbit only; readable with `email.view`; Reprocess requires `email.manage` |
 | `email_template` | Templates | `email.manage`; template edit grants also apply |
 | `email_template_version` | Versions on a template | Draft edits only; lifecycle uses record actions |
 | `email_brand` | Brands | `email.manage`; template edit grants also apply |
@@ -68,7 +70,7 @@ insert/update/delete capabilities. Labels contain no status decorations.
 ## Providers and credentials
 
 See the [provider setup guide](docs/PROVIDERS.md) for row fields, DNS/domain setup,
-limits, Gmail app passwords and the webhook configuration planned for phase (c).
+limits, Gmail app passwords and provider webhook setup.
 
 | Kind | Transport | Status |
 |---|---|---|
@@ -127,8 +129,8 @@ names and STARTTLS. GMAIL_API is refused with
 HTTP transports use fixed HTTPS endpoints, 10-second connect and 30-second request
 timeouts, and no redirects. HTTP 429/5xx retry with optional Retry-After; account
 and credential failures pause the provider. Tracking is explicitly controlled by
-`trackOpens` / `trackClicks`, off by default. Outbound tracking settings do not
-install the event webhook receiver; that arrives in phase (c).
+`trackOpens` / `trackClicks`, off by default. The producer registers the phase-(c)
+receiver idempotently when the provided Javalin middleware is present.
 
 ## Sending
 
@@ -241,6 +243,35 @@ sanitizer removes iframes and style blocks, so this preview is not an exact mail
 emulator. Draft MJML is compiled in memory for preview when a compiler is configured;
 preview never stores the result or changes the version.
 
+### Templates from another qbit
+
+A qbit that sends its own mail ships the template with its code instead of asking an
+administrator to create it. Describe it with `EmailTemplateDefinition` and call
+`EmailTemplates.ensure` at startup or before first use:
+
+```java
+boolean created = EmailTemplates.ensure(new EmailTemplateDefinition()
+   .withName("order_ready")
+   .withLabel("Order ready")
+   .withCategory(EmailCategory.TRANSACTIONAL)
+   .withSubject("Order {{order_number}} is ready")
+   .withBody("Hi {{customer_name}}, order {{order_number}} is ready for pickup.")
+   .withVariable("order_number", "Order number", "STRING", true, "PUBLIC")
+   .withVariable("customer_name", "Customer name", "STRING", true, null)
+   .withSampleVariables("{\"order_number\":\"A-1\",\"customer_name\":\"Pat\"}")
+   .withOwnerQbit("orders")
+   .withEditPermissionName("orders.edit"));
+```
+
+`kind` defaults to MARKDOWN (MJML and HTML are also accepted), `withTextBody` is
+optional, and `withVariablesSchema(json)` replaces `withVariable` when you already have
+the JSON. When no template of that name exists, `ensure` validates the definition like
+Activate Version (syntax, schema, a render with the samples, MJML compile), creates the
+template and an ACTIVE version 1 as the qbit, and returns true. When one exists it does
+nothing and returns false, so people's edits and later versions are never overwritten;
+the unique name settles concurrent callers. An invalid definition throws
+`IllegalArgumentException` with plain reasons and writes nothing.
+
 ## PHI and PII
 
 `withRecordVariable` reads through `QueryAction` in the sender's QContext; it does not
@@ -279,15 +310,17 @@ and content. Keys resolve through `secretResolver`; no secret values are stored.
 
 NOTIFICATION/MARKETING templates prepare footer links and headers using
 `QQQ_EMAIL_UNSUBSCRIBE_KEY` and `publicBaseUrl`; marketing refuses without them.
-Tokens bind the message, recipient-envelope hash and category. The phase-(c)
-unsubscribe route and Preferences are still pending: signed links are prepared here,
-but this qbit alone does not yet serve the unsubscribe destination. Do not deploy
-opt-out mail without that receiving handler.
+Tokens bind the message, recipient-envelope hash and category. The receiving route
+is implemented: GET only shows a light/dark confirmation page; explicit POST upserts
+category suppression and records UNSUBSCRIBED. Invalid or account/security tokens
+return 404. The legacy token covers every To/Cc/Bcc recipient, so use one mailbox
+per opt-out message for individual preferences. Preferences UI remains deferred
+until core #1162 ships in an RC.
 
 The home uses viewer-scoped counts and queries, UTC hour/day charts, provider health
 (admins), and 20 recent messages with masked recipients. No sample data or sampled
-counts are used. Bounce/complaint totals use dedicated event timestamps, populated
-by the future webhook phase or host integrations.
+counts are used. Delivered/bounced/complained totals count recipient events and
+use their occurred dates; sent/dead-letter totals count messages.
 
 ## Delivery and actions
 
@@ -331,11 +364,48 @@ Providers offer Send Test Email with a recipient input and a reported outcome.
 record bindings use `{"patient":{"table":"patient","id":123}}` in
 `recordVariablesJson`. Output includes `messageId`, `status`, and `reasons`.
 
-Hidden schedules are `email_dispatch` (15 s by default), `email_maintain` (300 s, lease
+Hidden schedules include `email_process_webhooks` (30 s), `email_dispatch` (15 s by default), `email_maintain` (300 s, lease
 recovery including disabled providers, and health probes), and `email_retention`
 (daily). Retention clears final-message bodies after 30 days, preserving `bodySha256`;
 message deletion is disabled by default. `finishedDate` records finalization independently
 of enqueue and later retention updates.
+
+## Delivery tracking
+
+Apply the new `email_webhook_inbox` and `email_event` DDL plus indexes for an existing
+phase-(a)/(b) database. Configure the authenticated HTTPS endpoints using
+[the provider guide](docs/PROVIDERS.md#event-webhooks). Verification supports SNS
+RSA v1/v2 with pinned topic and AWS certificate hosts, Postmark Basic auth,
+SendGrid ECDSA and Mailgun HMAC with durable nonce replay protection.
+
+The 1 MiB receiver persists before acknowledging. DB transactions serialize
+processing across replicas and commit event rows, message state and suppression
+atomically. Events in a payload are applied independently: matched events commit at
+once, and only unmatched events (or events whose message is still SENDING) retry the
+row with configured backoff. After six attempts they are skipped and the row finishes
+PROCESSED with a note ("N events did not match a message"). Rows that cannot be parsed
+or written fail after six attempts; **Reprocess** on FAILED inbox rows uses the
+standard Review/Result flow. An event whose recipient is not on the matched message
+is ignored, and an SES bounce or complaint without its recipient list is skipped.
+SNS notifications older than an hour or more than five minutes ahead are refused, and
+certificate fetch failures are cached for five minutes per URL. Disabled tracking is
+ignored. Per-event recipient keys deduplicate
+overlapping batches. All new service state is in the DB; certificate caches are in
+memory. No runtime filesystem or new dependencies are used.
+
+Hard bounce/complaint suppress ALL; provider unsubscribe suppresses the message's
+opt-out category. Message status never regresses from COMPLAINED to BOUNCED or
+DELIVERED. Optional `email.complaint` alerts warn after more than three complaints
+in 24 hours, with daily deduplication. Provider details mask addresses and are capped
+at 500 characters; raw authenticated inbox payloads are sensitive DB data.
+
+NOTIFICATION and MARKETING messages with unsubscribe configured require exactly one
+To recipient and no Cc/Bcc; send one message per recipient. The token binds that
+mailbox, and an unsubscribe POST suppresses only that address for the message's
+category. Multi-recipient requests are refused before suppression filtering.
+TRANSACTIONAL and SECURITY messages, and NOTIFICATION messages without unsubscribe
+configured, may still have multiple recipients. Existing single-recipient links
+remain valid; old multi-recipient links are rejected.
 
 ## Core messaging bridge
 
@@ -375,6 +445,7 @@ All settings have fluent `withX` setters and getters.
 | `backendName` | Required existing backend |
 | `schedulerName` | Optional existing scheduler; required for automatic dispatch |
 | `publicBaseUrl` | Public app URL for signed unsubscribe links |
+| `webhookBasePath` | `/qqq/hooks/email`; absolute path outside `/qqq/v1` |
 | `mjmlCompiler` | Optional `MjmlCompilerInterface`; required for MJML activation |
 | `classificationOverrides` | Map of `table.field` to `EmailClassifications.Level` for RC.5 |
 | `defaultProviderName` | Optional named provider override; otherwise enabled default row |

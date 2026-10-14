@@ -191,25 +191,75 @@ It would require a Google Cloud project, OAuth consent, client credentials and
 refresh-token management. It adds no needed system-mail capability over the app
 password preset in this phase and is built only on request (DESIGN 3.6).
 
-## Event webhooks: phase (c)
+## Event webhooks
 
-Event ingestion is **not installed by phase (b)**. After phase (c) is deployed,
-configure provider event delivery at:
+Phase (c) installs authenticated provider receivers when the host includes Javalin.
+Use `https://<app>{base}/{kind}/{providerName}`, where `base` is
+`EmailQBitConfig.webhookBasePath` (default `/qqq/hooks/email`), `kind` is `ses`,
+`postmark`, `sendgrid` or `mailgun`, and `providerName` is the row's unique name.
+The row must be enabled and its kind must match. The configurable base must start
+with `/`, have no trailing slash, and stay outside `/qqq/v1`.
 
-`https://<app>/qqq/hooks/email/{kind}/{providerName}`
-
-Use the configured provider name and provider-kind route defined by phase (c).
-Do not expect delivery/bounce/complaint/open/click updates until the receiver
-exists. Tracking options can operate on the provider side now.
-
-| Provider | Event setup to prepare |
+| Provider | Setup and events |
 |---|---|
-| Postmark | Server/stream event webhooks with Basic auth; `POSTMARK_WEBHOOK_PASSWORD` |
-| SendGrid | Signed Event Webhook; verification key in `SENDGRID_WEBHOOK_PUBLIC_KEY` |
-| Mailgun | Regional domain event webhooks; `MAILGUN_WEBHOOK_SIGNING_KEY`, separate from the sending key |
-| SES | Configuration-set events to SNS, HTTP subscription and `sns_topic_arn`; signature/topic verification arrives in phase (c) |
-| SMTP / Gmail SMTP | No native provider event webhook in this design |
+| SES | Send configuration-set Delivery, Bounce, Complaint, Reject and DeliveryDelay events to SNS; enable Open/Click only when desired. Set `sns_topic_arn` to that exact topic. Subscribe the HTTPS `/ses/{providerName}` URL with raw delivery **off**, so SNS sends its signed JSON envelope. No webhook secret env is used. Verified subscription confirmations are fetched automatically and retained as IGNORED inbox rows. |
+| Postmark | Configure server/message-stream webhooks for Delivery, Bounce, SpamComplaint and SubscriptionChange; optionally Open and Click. Use HTTP Basic username **`postmark`** and the password resolved from `webhook_secret_env_name` (normally `POSTMARK_WEBHOOK_PASSWORD`). Configure those credentials in Postmark's webhook settings/URL; keep the stored provider row limited to the environment name. |
+| SendGrid | Enable the Signed Event Webhook for delivered, bounce, dropped, deferred, spamreport and unsubscribe (group_unsubscribe is also accepted); optionally open/click. Store the base64 DER verification public key in `SENDGRID_WEBHOOK_PUBLIC_KEY`, referenced by `webhook_secret_env_name`. Preserve both Twilio signature/timestamp headers through the proxy. Batches are authenticated over timestamp plus the unchanged raw body. |
+| Mailgun | Configure regional domain webhooks for delivered, permanent/temporary failed, complained and unsubscribed; optionally opened/clicked. Set `webhook_secret_env_name=MAILGUN_WEBHOOK_SIGNING_KEY` to the account's HTTP webhook signing key, **not** its sending API key. Preserve the JSON `signature` object and `event-data`. |
+| SMTP / Gmail SMTP | No native event receiver. One-click unsubscribe remains available for opt-out mail. |
 
-Webhook environment names are allowlisted now so rows can be prepared; outbound
-sends never resolve them. Verification, durable event processing and unsubscribe
-handling arrive in later phases.
+SNS accepts SignatureVersion 1 and 2, pins TopicArn, and fetches certificates only
+from HTTPS `sns.<region>.amazonaws.com` or `.amazonaws.com.cn` hosts with `.pem`
+paths. Certificates are cached only in memory; redirects are disabled. Confirmation
+URLs use the same HTTPS host restriction. Canonicalization follows
+[AWS's signature rules](https://docs.aws.amazon.com/sns/latest/dg/sns-verify-signature-of-message-verify-message-signature.html).
+SNS retries can be old, so freshness is enforced only for SendGrid and Mailgun:
+timestamps must be within five minutes in either direction. Keep host clocks synchronized.
+Postmark authenticates the request with Basic auth and supplies no signed timestamp.
+
+Requests are capped at 1 MiB, including chunked requests. Responses are JSON:
+200 `received` or `duplicate`, 401 invalid verification/Mailgun nonce replay,
+404 missing/disabled/mismatched provider, 413 oversized input, and 503 unavailable
+verification configuration, SNS fetch or database. No request bodies, recipient
+addresses or credential values are logged. Raw payloads are stored in the DB inbox
+as sensitive data, readable with `email.view`.
+
+The hidden `email_process_webhooks` schedule runs every 30 seconds. One bounded
+transaction applies each inbox row, including events, message state and suppressions.
+The common provider lock serializes suppression upserts across replicas/providers;
+no network I/O occurs under that lock. Failed attempts back off with `retryMinutes`
+and become FAILED after six attempts. Use the inbox's **Reprocess** Review/Result
+action (`email.manage`) after resolving the cause. Unmatched messages retry, including
+a webhook racing the transport's SENT commit. Unknown/disabled tracking events are
+IGNORED. Per-event recipient keys prevent overlapping SendGrid batches from duplicating
+history. Mailgun's `(provider_id, nonce)` uniqueness is distinct from event deduplication:
+a stored nonce is refused with 401 even if its event is already known.
+
+Hard bounces and complaints upsert ALL suppression; complaints take precedence over
+hard-bounce reasons. Unsubscribe events suppress only MARKETING or NOTIFICATION for
+the matched message. Delivery advances SENT to DELIVERED; hard bounce and complaint
+advance delivery state without reversing a later complaint. Opens/clicks require the
+corresponding provider flag and are never retained for PHI-approved messages.
+Provider reason text is address-masked and limited to 500 characters; only clicks
+retain URLs. More than three complaints in 24 hours raises optional WARNING alert
+`email.complaint`, deduplicated per UTC day by core's alert sink.
+
+## One-click unsubscribe
+
+Set `publicBaseUrl` to the public HTTPS app origin and supply
+`QQQ_EMAIL_UNSUBSCRIBE_KEY` through the secret resolver. The configured webhook base
+also controls newly signed unsubscribe URLs. Keep the key and published path stable:
+tokens have no expiry, but cannot resolve after their message row is deleted.
+
+GET `{base}/unsubscribe/{token}` displays a self-contained, escaped light/dark form
+and never changes state. POST `List-Unsubscribe=One-Click` returns an empty 200;
+the page's form POST returns confirmation HTML. Both atomically upsert category
+suppression and record an UNSUBSCRIBED event. Repeated POSTs do not duplicate events.
+Invalid tokens return a generic 404. TRANSACTIONAL and SECURITY tokens are neither
+issued nor accepted.
+
+The existing v1 token binds the message, category and **complete To/Cc/Bcc envelope
+hash**, rather than one mailbox. Following that link opts out every mailbox in the
+bound envelope for that category; the page reveals none of those addresses. Send
+one recipient per opt-out message when individual preference control is needed.
+Preferences UI remains deferred until core #1162 ships in an RC.

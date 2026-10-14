@@ -35,6 +35,7 @@ import com.kingsrook.qqq.backend.core.alerts.QAlerts;
  *******************************************************************************/
 public final class EmailAlerts
 {
+   public static final String COMPLAINT = "email.complaint";
    public static final String UNHEALTHY = "email.provider.unhealthy";
    public static final String DEAD_LETTER = "email.message.dead-letter";
 
@@ -50,7 +51,9 @@ public final class EmailAlerts
     *******************************************************************************/
    public static List<QAlertTypeMetaData> types()
    {
-      return (List.of(new QAlertTypeMetaData().withName(UNHEALTHY).withLabel("Email provider unhealthy").withDefaultSeverity(AlertSeverity.ERROR)
+      return (List.of(new QAlertTypeMetaData().withName(COMPLAINT).withLabel("Email complaints").withDefaultSeverity(AlertSeverity.WARNING)
+            .withSubjectTableName(EmailTables.EVENT).withVisibilityPermission("email.view").withSourceName("email"),
+         new QAlertTypeMetaData().withName(UNHEALTHY).withLabel("Email provider unhealthy").withDefaultSeverity(AlertSeverity.ERROR)
             .withSubjectTableName(EmailTables.PROVIDER).withVisibilityPermission("email.admin").withSourceName("email"),
          new QAlertTypeMetaData().withName(DEAD_LETTER).withLabel("Email dead letters").withDefaultSeverity(AlertSeverity.WARNING)
             .withSubjectTableName(EmailTables.MESSAGE).withVisibilityPermission("email.view").withSourceName("email")));
@@ -62,7 +65,11 @@ public final class EmailAlerts
    public static void raise(String type, Integer providerId)
    {
       String key = "provider:" + providerId + (DEAD_LETTER.equals(type) ? ":" + EmailRuntime.clock().instant().getEpochSecond() / 3600 : "");
-      QAlerts.raise(new AlertSignal(type).withDedupKey(key).withTitle(UNHEALTHY.equals(type) ? "Email provider unhealthy" : "Email message dead-lettered")
+      if(COMPLAINT.equals(type))
+      {
+         key = "complaints:" + EmailRuntime.clock().instant().getEpochSecond() / 86400;
+      }
+      QAlerts.raise(new AlertSignal(type).withDedupKey(key).withTitle(COMPLAINT.equals(type) ? "More than three email complaints in 24 hours" : UNHEALTHY.equals(type) ? "Email provider unhealthy" : "Email message dead-lettered")
          .withSummary("Review the Email tables for status and retry actions."));
    }
 

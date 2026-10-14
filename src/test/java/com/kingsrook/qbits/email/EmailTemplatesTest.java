@@ -158,6 +158,33 @@ class EmailTemplatesTest
    }
 
    /*******************************************************************************
+    ** Template categories and retained resend links enforce the same mailbox boundary.
+    *******************************************************************************/
+   @Test
+   void unsubscribeTemplateCategoryAndResend() throws Exception
+   {
+      EmailRuntime.config().withSecretResolver(name -> "test-unsubscribe-key");
+      QRecord version = draft("notice", "MARKDOWN", "[]", "{}", "A notification");
+      SystemWrites.updateOne(EmailTables.TEMPLATE, new QRecord().withValue("id", version.getValue("templateId")).withValue("category", "NOTIFICATION"));
+      EmailVersions.activate(version.getValueInteger("id"));
+      var refused = EmailService.send(new EmailRequest().withTemplateName("notice").withTo("person@example.com").withBcc("other@example.com"));
+      assertThat(refused.status()).isEqualTo(EmailSendResult.Status.REFUSED);
+      assertThat(refused.reasons()).containsExactly("Notification and marketing email with an unsubscribe link goes to one recipient per message; send one message per recipient.");
+      var queued = EmailService.send(new EmailRequest().withTemplateName("notice").withTo("\"Person, One\" <PERSON@example.com>"));
+      assertThat(queued.status()).isEqualTo(EmailSendResult.Status.QUEUED);
+      var resent = EmailService.resend(queued.messageId());
+      assertThat(resent.status()).isEqualTo(EmailSendResult.Status.QUEUED);
+      QRecord message = EmailStore.get(EmailTables.MESSAGE, queued.messageId(), null);
+      String url = message.getValueString("unsubscribeUrl");
+      assertThat(EmailStore.get(EmailTables.MESSAGE, resent.messageId(), null).getValueString("unsubscribeUrl")).isEqualTo(url);
+      new com.kingsrook.qbits.email.tracking.EmailUnsubscribe().unsubscribe(url.substring(url.lastIndexOf('/') + 1));
+      assertThat(H2Support.all(EmailTables.SUPPRESSION)).hasSize(1).allSatisfy(row -> assertThat(row.getValueString("address")).isEqualTo("person@example.com"));
+      SystemWrites.updateOne(EmailTables.MESSAGE, new QRecord().withValue("id", queued.messageId()).withValue("ccAddresses", "other@example.com"));
+      EmailRuntime.config().withSecretResolver(name -> null);
+      assertThat(EmailService.resend(queued.messageId()).status()).isEqualTo(EmailSendResult.Status.REFUSED);
+   }
+
+   /*******************************************************************************
     ** Branded rendered templates reach a real SMTP sink with both alternatives.
     *******************************************************************************/
    @Test
@@ -220,8 +247,15 @@ class EmailTemplatesTest
       SystemWrites.insertOne(EmailTables.ATTEMPT, new QRecord().withValue("messageId", 1).withValue("providerId", 1).withValue("attemptNumber", 1)
          .withValue("outcome", "SUCCEEDED").withValue("startDate", now.minusSeconds(10)).withValue("endDate", now));
       H2Support.insert(EmailTables.SUPPRESSION, new QRecord().withValue("address", "x@example.com").withValue("scope", "ALL").withValue("reason", "MANUAL"));
+      for(String type : List.of("DELIVERED", "BOUNCED", "COMPLAINED"))
+      {
+         SystemWrites.insertOne(EmailTables.EVENT, new QRecord().withValue("messageId", 1).withValue("eventType", type).withValue("eventKey", type)
+            .withValue("occurredDate", "DELIVERED".equals(type) ? now : now.minusSeconds(("BOUNCED".equals(type) ? 2 : 8) * 86400)));
+      }
+      SystemWrites.insertOne(EmailTables.EVENT, new QRecord().withValue("messageId", 1).withValue("eventType", "DELIVERED").withValue("eventKey", "second-delivery")
+         .withValue("occurredDate", now.minusSeconds(60)));
       var tiles = org.jsoup.Jsoup.parse(EmailHome.overview().getHtml()).select("body > div > div > div");
-      assertThat(tiles).extracting(org.jsoup.nodes.Element::text).containsExactly("1 Sent (24 h)", "1 Delivered (24 h)", "0 Dead letters (24 h)", "1 Bounced (7 d)", "0 Complaints (7 d)", "1 Suppressed addresses");
+      assertThat(tiles).extracting(org.jsoup.nodes.Element::text).containsExactly("1 Sent (24 h)", "2 Delivered (24 h)", "0 Dead letters (24 h)", "1 Bounced (7 d)", "0 Complaints (7 d)", "1 Suppressed addresses");
       assertThat(EmailHome.hourly().getChartData().getDatasets().getFirst().getData()).contains(1);
       assertThat(EmailHome.suppressions().getChartData().getDatasets().get(3).getData()).contains(1);
       QRecord defaultBrand = H2Support.insert(EmailTables.BRAND, new QRecord().withValue("name", "default").withValue("label", "Default").withValue("isDefault", true));
@@ -261,6 +295,9 @@ class EmailTemplatesTest
       EmailRuntime.config().withSecretResolver(name -> null);
       assertThat(com.kingsrook.qbits.email.render.EmailUnsubscribeLinks.create("1", "address", "NOTIFICATION")).isNull();
       assertThatThrownBy(() -> com.kingsrook.qbits.email.render.EmailUnsubscribeLinks.create("1", "address", "MARKETING")).hasMessageContaining("QQQ_EMAIL_UNSUBSCRIBE_KEY");
+      EmailRuntime.config().withSecretResolver(name -> { throw new IllegalArgumentException("resolver detail"); });
+      assertThatThrownBy(() -> com.kingsrook.qbits.email.render.EmailUnsubscribeLinks.create("1", "person@example.com", "NOTIFICATION"))
+         .hasMessage("Opt-out email needs publicBaseUrl and QQQ_EMAIL_UNSUBSCRIBE_KEY");
    }
 
    /*******************************************************************************

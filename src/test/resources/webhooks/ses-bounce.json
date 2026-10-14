@@ -1,0 +1,10 @@
+{
+  "Type": "Notification",
+  "MessageId": "sns-envelope-1",
+  "TopicArn": "arn:aws:sns:us-east-1:123456789012:email-events",
+  "Timestamp": "2026-10-13T12:00:00Z",
+  "SignatureVersion": "2",
+  "SigningCertURL": "https://sns.us-east-1.amazonaws.com/test-only.pem",
+  "Signature": "signed-in-test",
+  "Message": "{\"eventType\": \"Bounce\", \"mail\": {\"messageId\": \"provider-message-1\", \"destination\": [\"recipient@example.com\", \"second@example.com\"], \"headers\": [{\"name\": \"X-QQQ-Email-Id\", \"value\": \"1\"}]}, \"bounce\": {\"bounceType\": \"Permanent\", \"bounceSubType\": \"General\", \"timestamp\": \"2026-10-13T12:01:00Z\", \"bouncedRecipients\": [{\"emailAddress\": \"recipient@example.com\", \"diagnosticCode\": \"smtp; 550 recipient@example.com unavailable\"}, {\"emailAddress\": \"second@example.com\", \"diagnosticCode\": \"smtp; 550 second@example.com unavailable\"}]}}"
+}

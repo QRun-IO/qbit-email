@@ -46,6 +46,7 @@ public class EmailQBitConfig implements QBitConfig
    private String backendName;
    private String schedulerName;
    private String publicBaseUrl;
+   private String webhookBasePath = "/qqq/hooks/email";
    private String defaultProviderName;
    private String bridgeProviderName = "qbitEmail";
    private Function<String, String> secretResolver = System::getenv;
@@ -89,6 +90,11 @@ public class EmailQBitConfig implements QBitConfig
    @Override
    public void validate(QInstance instance, List<String> errors)
    {
+      if(webhookBasePath == null || !webhookBasePath.matches("/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+")
+         || webhookBasePath.equals("/qqq/v1") || webhookBasePath.startsWith("/qqq/v1/"))
+      {
+         errors.add("webhookBasePath must be an absolute path outside /qqq/v1, without a trailing slash");
+      }
       if(backendName == null || backendName.isBlank())
       {
          errors.add("backendName is required");
@@ -199,6 +205,23 @@ public class EmailQBitConfig implements QBitConfig
    public String getPublicBaseUrl()
    {
       return (publicBaseUrl);
+   }
+
+   /*******************************************************************************
+    ** Public provider and unsubscribe route base.
+    *******************************************************************************/
+   public String getWebhookBasePath()
+   {
+      return (webhookBasePath);
+   }
+
+   /*******************************************************************************
+    ** Configure the route base and queue-time unsubscribe URLs together.
+    *******************************************************************************/
+   public EmailQBitConfig withWebhookBasePath(String webhookBasePath)
+   {
+      this.webhookBasePath = webhookBasePath;
+      return (this);
    }
 
 

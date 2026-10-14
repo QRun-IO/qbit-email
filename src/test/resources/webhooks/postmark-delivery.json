@@ -1,0 +1,7 @@
+{
+  "RecordType": "Delivery",
+  "MessageID": "provider-message-1",
+  "Recipient": "recipient@example.com",
+  "DeliveredAt": "2026-10-13T12:00:00Z",
+  "Details": "250 accepted"
+}

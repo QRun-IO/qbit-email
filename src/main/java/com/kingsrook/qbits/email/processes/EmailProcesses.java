@@ -86,6 +86,8 @@ public final class EmailProcesses
    public static final String SEND_TEMPLATED = "email_send_templated";
    public static final String DISPATCH = "email_dispatch";
    public static final String MAINTAIN = "email_maintain";
+   public static final String REPROCESS = "email_reprocess_webhook";
+   public static final String PROCESS_WEBHOOKS = "email_process_webhooks";
    public static final String RETENTION = "email_retention";
 
    /*******************************************************************************
@@ -102,7 +104,7 @@ public final class EmailProcesses
    {
       return (switch(name)
       {
-         case RESEND, CANCEL, SEND_NOW, NEW_VERSION, ACTIVATE_VERSION -> EmailPermissions.MANAGE;
+         case REPROCESS, RESEND, CANCEL, SEND_NOW, NEW_VERSION, ACTIVATE_VERSION -> EmailPermissions.MANAGE;
          case SEND_TEMPLATED, SEND_AD_HOC -> EmailPermissions.SEND;
          default -> EmailPermissions.ADMIN;
       });
@@ -136,6 +138,7 @@ public final class EmailProcesses
          action(SEND_NOW, "Send Now", EmailTables.MESSAGE), test, send, adHoc,
          action(NEW_VERSION, "New Version", EmailTables.TEMPLATE), action(ACTIVATE_VERSION, "Activate Version", EmailTables.VERSION),
          action(APPROVE_PHI, "Approve For PHI", EmailTables.VERSION),
+         action(REPROCESS, "Reprocess", EmailTables.INBOX), scheduled(config, PROCESS_WEBHOOKS, "Process Email Webhooks", 30),
          scheduled(config, DISPATCH, "Dispatch Email", config.getDispatchIntervalSeconds()),
          scheduled(config, MAINTAIN, "Maintain Email", 300), scheduled(config, RETENTION, "Email Retention", 86400)));
    }
@@ -175,6 +178,10 @@ public final class EmailProcesses
     *******************************************************************************/
    private static boolean eligible(String process, QRecord row)
    {
+      if(REPROCESS.equals(process))
+      {
+         return ("FAILED".equals(row.getValueString("status")));
+      }
       if(NEW_VERSION.equals(process))
       {
          return (true);
@@ -266,7 +273,7 @@ public final class EmailProcesses
          {
             Integer id = row.getValueInteger("id");
             QRecord current = EmailStore.get(NEW_VERSION.equals(process) ? EmailTables.TEMPLATE : List.of(ACTIVATE_VERSION, APPROVE_PHI).contains(process) ? EmailTables.VERSION
-               : SEND_TEST.equals(process) ? EmailTables.PROVIDER : EmailTables.MESSAGE, id, null);
+               : REPROCESS.equals(process) ? EmailTables.INBOX : SEND_TEST.equals(process) ? EmailTables.PROVIDER : EmailTables.MESSAGE, id, null);
             String result = "Skipped";
             if(current != null && eligible(process, current))
             {
@@ -283,6 +290,7 @@ public final class EmailProcesses
                      com.kingsrook.qbits.email.template.EmailVersions.approve(id);
                      yield "Approved for PHI";
                   }
+                  case REPROCESS -> com.kingsrook.qbits.email.tracking.EmailInboxProcessor.reprocess(id) ? "PENDING" : "Skipped";
                   case SEND_NOW -> new EmailDispatcher().sendNow(id).name();
                   case CANCEL -> cancel(id) ? "CANCELLED" : "Skipped";
                   case RESEND -> resend(current).status().name();
@@ -431,6 +439,7 @@ public final class EmailProcesses
       {
          switch(input.getProcessName())
          {
+            case PROCESS_WEBHOOKS -> new com.kingsrook.qbits.email.tracking.EmailInboxProcessor().runOnce();
             case RETENTION -> retain();
             case MAINTAIN -> new EmailDispatcher().maintain();
             default -> new EmailDispatcher().runOnce();
@@ -440,6 +449,8 @@ public final class EmailProcesses
 
    /*******************************************************************************
     ** Clear retained bodies and optionally delete final messages and their attempts.
+    ** NOTIFICATION and MARKETING messages are never deleted (their unsubscribe links must
+    ** keep working); at message retention only their bodies and variable snapshot are cleared.
     *******************************************************************************/
    public static void retain() throws QException
    {
@@ -464,18 +475,35 @@ public final class EmailProcesses
          {
             continue;
          }
-         if(config.getMessageRetentionDays() > 0 && finalDate.isBefore(now.minus(Duration.ofDays(config.getMessageRetentionDays()))))
+         boolean expired = config.getMessageRetentionDays() > 0 && finalDate.isBefore(now.minus(Duration.ofDays(config.getMessageRetentionDays())));
+         boolean optOut = List.of("NOTIFICATION", "MARKETING").contains(row.getValueString("category"));
+         if(expired && !optOut)
          {
             try(QBackendTransaction transaction = QBackendTransaction.openFor(new UpdateInput(EmailTables.MESSAGE)))
             {
+               if(row.getValueInteger("providerId") != null)
+               {
+                  com.kingsrook.qbits.email.tracking.EmailTrackingStore.lock(row.getValueInteger("providerId"), transaction);
+               }
+               SystemWrites.delete(EmailTables.EVENT, EmailStore.equal("messageId", row.getValueInteger("id")), transaction);
                SystemWrites.delete(EmailTables.ATTEMPT, EmailStore.equal("messageId", row.getValueInteger("id")), transaction);
                SystemWrites.delete(EmailTables.MESSAGE, EmailStore.equal("id", row.getValueInteger("id")), transaction);
                transaction.commit();
             }
          }
-         else if(finalDate.isBefore(now.minus(Duration.ofDays(config.getBodyRetentionDays()))) && (row.getValue("htmlBody") != null || row.getValue("textBody") != null))
+         else if(expired || finalDate.isBefore(now.minus(Duration.ofDays(config.getBodyRetentionDays()))))
          {
-            SystemWrites.updateOne(EmailTables.MESSAGE, new QRecord().withValue("id", row.getValue("id")).withValue("htmlBody", null).withValue("textBody", null));
+            // Notification and marketing rows are never deleted, so their unsubscribe links keep working; only content goes.
+            boolean clearSnapshot = expired && row.getValue("variablesSnapshot") != null;
+            if(row.getValue("htmlBody") != null || row.getValue("textBody") != null || clearSnapshot)
+            {
+               QRecord update = new QRecord().withValue("id", row.getValue("id")).withValue("htmlBody", null).withValue("textBody", null);
+               if(clearSnapshot)
+               {
+                  update.withValue("variablesSnapshot", null);
+               }
+               SystemWrites.updateOne(EmailTables.MESSAGE, update);
+            }
          }
       }
    }

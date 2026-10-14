@@ -1,6 +1,6 @@
 # qbit-email design
 
-**Status:** phase (a) implemented; later phases remain specification. Phases (a) to (d) build outbound; phase (e) is inbound (section 12, design only).
+**Status:** phases (a), (b) and (c) implemented, except Preferences (8.3), deferred until core #1162 ships in an RC. Phase (d) consumer migrations and phase (e) inbound remain specification.
 **Brief:** owner decisions of 2026-10-13 (providers, outbound first, both template kinds).
 **Owner decisions (2026-10-12): all recommendations accepted.** Every "Recommended" choice and
 every decision below stands; it is adjusted once it can be seen working.
@@ -205,7 +205,9 @@ error) and `email_event` (section 6).
   content), Cancel (queued or waiting), Send Now (waiting). Standard streamed-ETL Review and Result
   screens.
 - **Retention:** a daily job clears bodies after `bodyRetentionDays` and deletes final messages
-  older than `messageRetentionDays` (0 = keep forever; kof22 keeps).
+  older than `messageRetentionDays` (0 = keep forever; kof22 keeps). NOTIFICATION and MARKETING
+  messages are never deleted, because their unsubscribe links resolve through the message row
+  (8.2); at `messageRetentionDays` retention only clears their bodies and variable snapshot.
 
 ## 5. Templates and branding
 
@@ -283,11 +285,10 @@ id, or unsaved source, plus variables) returns subject, html, text and warnings.
   token snapshot, linking to the original message for the token binding.
 - The home follows the newer Alerts pattern: standard QQQ chart widgets plus inline,
   theme-neutral cards. All queries/counts use the viewer's session. Bounce/complaint
-  dates have dedicated columns for phase-(c) events; no dates or metrics are invented.
-- Part 2 signs opt-out links and prepares headers; the receiving unsubscribe handler
-  remains phase (c). Without its key/base URL, notification omits opt-out links and
+  dates are populated by phase-(c) events; home totals count those recipient events.
+- Part 2 signs opt-out links and prepares headers; phase (c) now serves the receiver. Without its key/base URL, notification omits opt-out links and
   headers, while marketing refuses as specified in 8.2. Do not use opt-out delivery
-  without a receiving handler. The token's address hash covers the recipient envelope.
+  without a receiving handler. The token's address hash binds the single recipient mailbox.
 
 ## 6. Delivery tracking
 
@@ -311,6 +312,32 @@ message_id (matched by provider message id or our header), provider_id, event_ty
 DEFERRED, BOUNCED, COMPLAINED, OPENED, CLICKED, UNSUBSCRIBED, REJECTED), bounce_type (HARD, SOFT,
 UNDETERMINED), recipient, occurred_date, detail (the provider's reason, truncated; never body
 content), url (clicks only). Opens and clicks are stored only when the provider row enables them.
+
+### 6.3 Phase (c) implementation
+- Inbox states: PENDING, PROCESSED, FAILED, IGNORED. Retry after configured backoff,
+  FAILED after six attempts, and a standard Reprocess action resets FAILED to PENDING.
+- Events in one payload are applied independently. Only unmatched events (or events whose
+  message is still SENDING) defer the row; on the sixth attempt they are skipped and the row is
+  PROCESSED with the note "N events did not match a message". Suppression applies only to a
+  recipient in the matched message's to, cc or bcc; an SES bounce or complaint without its
+  recipient list is skipped, never widened to all destinations. SNS notifications must carry a
+  Timestamp no older than 1 hour and no more than 5 minutes ahead, and certificate fetch
+  failures are cached for 5 minutes per URL.
+- A short DB transaction locks the common provider gate then the actual provider;
+  it rechecks the observed inbox attempt and commits all changes together. No worker
+  filesystem, extra claim table, in-process scheduler or network operation is needed
+  during processing. A crash rolls back the transaction and releases the claim.
+- `email_event.event_key` provides unique recipient/event deduplication across
+  overlapping batches, alongside inbox uniqueness on provider/event and provider/nonce.
+- Message correlation always stays within the authenticated provider. Unknown message
+  ids retry (including callbacks before SENT); unsupported event kinds are ignored.
+- Opens/clicks require current provider flags and are also dropped for PHI-approved
+  messages. Event details mask addresses before truncation to 500 characters.
+- The unsubscribe signer binds one mailbox. A valid POST suppresses only that address
+  for MARKETING/NOTIFICATION; the page never displays addresses. Legacy links remain
+  valid only for messages with one To recipient and no Cc/Bcc.
+- PostgreSQL and H2 definitions, crypto fixtures and real random-port Javalin tests
+  are included. Certificate caching is memory-only. Setup is in `PROVIDERS.md`.
 
 ## 7. PHI and PII
 
@@ -371,6 +398,7 @@ MANUAL), source_message_id, source_event_id, note, created_date, expires_date (o
   respects HARD_BOUNCE and COMPLAINT.
 
 ### 8.2 One-click unsubscribe (RFC 8058, RFC 2369)
+- NOTIFICATION or MARKETING messages carrying an unsubscribe link/header must have exactly one To recipient and no Cc/Bcc; send one message per recipient.
 - MARKETING and NOTIFICATION messages carry
   `List-Unsubscribe: <https://{publicBaseUrl}/qqq/hooks/email/unsubscribe/{token}>` and
   `List-Unsubscribe-Post: List-Unsubscribe=One-Click`, and the footer links to the same URL.
@@ -379,11 +407,11 @@ MANUAL), source_message_id, source_event_id, note, created_date, expires_date (o
   MARKETING sends are refused. Tokens do not expire (RFC 8058 expects the link to keep working).
 - `POST` with `List-Unsubscribe=One-Click` records the suppression and returns 200. `GET` returns a
   minimal page with one "Unsubscribe" button that POSTs, because mail scanners prefetch GETs; then
-  "You are unsubscribed from {category}", with a link to Preferences.
+  "You are unsubscribed from {category}". A Preferences link awaits core #1162.
 - An `UNSUBSCRIBED` event is recorded on the message.
 
 ### 8.3 Preferences (core #1162)
-The qbit registers a Preferences section `email` ("Email") whose provider
+**Deferred: core #1162 is not in an RC.** The planned qbit registers a Preferences section `email` ("Email") whose provider
 (`EmailPreferenceProvider implements UserPreferenceProviderInterface`) maps the signed-in user's
 address (`UserPreferenceRequestContext.getUserEmailAddress()`, never an address from the request)
 to `email_suppression` rows: one toggle per opt-out-able category (NOTIFICATION,
@@ -455,10 +483,11 @@ section's description explains the split with qbit-alerts' Notifications section
 | `email_webhook_inbox` | relation (on the provider) | the qbit |
 | `email_inbound`, `email_inbound_attachment` | phase (e) | the qbit |
 
-Postgres DDL in `docs/ddl/email-postgres.sql` (phase a).
+Postgres DDL in `docs/ddl/email-postgres.sql` (phases a-c).
 
 ## 14. Configuration (`EmailQBitConfig`)
-backendName (required), schedulerName (required to send), publicBaseUrl (unsubscribe links),
+backendName (required), schedulerName (required for automatic processing), publicBaseUrl (unsubscribe links),
+webhookBasePath (`/qqq/hooks/email`, shared by tracking and unsubscribe),
 defaultProviderName, bridgeProviderName (`qbitEmail`), secretResolver, allowedEnvNames,
 dispatchIntervalSeconds (15), batchSize (100), maxAttempts (6), retryMinutes, leaseSeconds (120),
 bodyRetentionDays (30), messageRetentionDays (0), mjmlCompiler, classificationOverrides, appName
@@ -469,12 +498,12 @@ and appLabel, securityFields and recordSecurityLocks (multi-tenant hosts).
 |---|---|---|
 | (a) | tables, outbox and dispatcher, SMTP and SES, Markdown/HTML/MJML templates and versions, brands and the layout, preview, EmailService, the process, the core bridge, PHI refusal and redaction, the app home | GreenMail SMTP sink end to end; SES through a mocked `SesV2Client`; the claim race (two runners, each message sent once); retry, dead letter, idempotency; rendering (variables, escaping, `#if`/`#each`, plain text, dark-mode contrast); PHI refusal; snapshot redaction; the canary test; producer standards (names, nav, permissions) |
 | (b) | Postmark, SendGrid, Mailgun, Gmail SMTP | HTTP mocks per provider (success, 4xx permanent, 429/5xx transient); the Gmail preset. HTML/MJML moved into part (a), part 2 at owner request. |
-| (c) | webhook route and inbox, events, suppression, unsubscribe, Preferences section | signature verification per provider (valid, tampered, stale, missing secret); the SNS certificate host rule; suppression on hard bounce and complaint; one-click POST and the GET page; category rules |
+| (c) | webhook route and inbox, events, suppression, unsubscribe (Preferences deferred) | signature verification per provider (valid, tampered, stale, missing secret); the SNS certificate host rule; suppression on hard bounce and complaint; one-click POST and the GET page; category rules |
 | (d) | consumer migrations | each consumer's own tests; a contract test of `EmailService` |
 | (e) | inbound | design only for now |
 
 Dependencies: phase (a) builds on QQQ 4.1.0-RC.5 with the classification stand-in, and moves to
-RC.6 for `DataClassification` and Preferences.
+later RCs for `DataClassification` and Preferences when their APIs are released.
 
 ## 16. Owner steps (outside code)
 - **PMG (kof22):** none; the relay already accepts the cluster.

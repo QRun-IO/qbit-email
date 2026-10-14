@@ -1,0 +1,9 @@
+{
+  "RecordType": "Bounce",
+  "ID": 10001,
+  "MessageID": "provider-message-1",
+  "Type": "HardBounce",
+  "Email": "recipient@example.com",
+  "BouncedAt": "2026-10-13T12:01:00Z",
+  "Description": "550 mailbox recipient@example.com is unavailable"
+}

@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- Phase (c): authenticated SNS, Postmark, SendGrid and Mailgun webhooks, durable inbox deduplication and Mailgun nonce replay protection; configurable Javalin routes.
+- Atomic scheduled event processing, per-recipient event history, monotonic delivery state, category-aware suppression, optional daily complaint alerts and FAILED inbox Reprocess with Review/Result.
+- One-click unsubscribe and escaped self-contained light/dark confirmation pages using the existing envelope-bound signer; account/security tokens refused.
+- Event-based home totals, PostgreSQL/H2 tracking DDL, provider setup instructions, test-only SNS certificate/key and real HTTP, crypto, parser, concurrency, retry and privacy tests. Preferences stays deferred until core #1162 reaches an RC.
 - Phase (a), part 2: versioned Markdown/HTML/MJML templates, typed variable schemas, escaped blocks/loops/fallbacks, branded light/dark layout and contrast validation.
 - New Version, Activate Version and version-bound Approve For PHI actions, edit permissions, immutable history and parent-scoped version selectors.
 - Sender-scoped record variables, classification stand-in, HMAC snapshot tokens, AES-GCM bodies, encrypted query displays and protected resend.

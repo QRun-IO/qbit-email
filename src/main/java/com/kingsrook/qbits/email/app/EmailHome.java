@@ -68,8 +68,21 @@ public final class EmailHome
       String[] fields = {"sentDate", "deliveredDate", "deadLetterDate", "bouncedDate", "complainedDate"};
       for(int i = 0; i < fields.length; i++)
       {
-         totals.add(count(EmailTables.MESSAGE, since(fields[i], now.minus(i < 3 ? 1 : 7, ChronoUnit.DAYS))
-            .withCriteria(fields[i], QCriteriaOperator.LESS_THAN_OR_EQUALS, now)));
+         String eventType = switch(i)
+         {
+            case 1 -> "DELIVERED";
+            case 3 -> "BOUNCED";
+            case 4 -> "COMPLAINED";
+            default -> null;
+         };
+         String field = eventType == null ? fields[i] : "occurredDate";
+         QQueryFilter filter = since(field, now.minus(i < 3 ? 1 : 7, ChronoUnit.DAYS))
+            .withCriteria(field, QCriteriaOperator.LESS_THAN_OR_EQUALS, now);
+         if(eventType != null)
+         {
+            filter.withCriteria("eventType", QCriteriaOperator.EQUALS, eventType);
+         }
+         totals.add(count(eventType == null ? EmailTables.MESSAGE : EmailTables.EVENT, filter));
       }
       totals.add(count(EmailTables.SUPPRESSION, new QQueryFilter()));
       List<QRecord> messages = query(EmailTables.MESSAGE, new QQueryFilter().withOrderBy(new QFilterOrderBy("createDate", false))
