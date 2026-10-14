@@ -22,9 +22,6 @@ package com.kingsrook.qbits.email.tracking;
 
 
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
 import com.kingsrook.qbits.email.EmailRuntime;
 import com.kingsrook.qbits.email.metadata.EmailTables;
 import com.kingsrook.qbits.email.render.EmailUnsubscribeLinks;
@@ -34,7 +31,6 @@ import com.kingsrook.qqq.backend.core.actions.QBackendTransaction;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
 import com.kingsrook.qqq.backend.core.model.actions.tables.update.UpdateInput;
 import com.kingsrook.qqq.backend.core.model.data.QRecord;
-import jakarta.mail.internet.InternetAddress;
 import org.json.JSONObject;
 
 
@@ -44,9 +40,17 @@ import org.json.JSONObject;
 public final class EmailUnsubscribe
 {
    /*******************************************************************************
-    ** Resolve the signed message and unchanged recipient envelope, without writes.
+    ** Resolve the signed message and its single recipient, without writes.
     *******************************************************************************/
    public QRecord resolve(String token) throws QException
+   {
+      return (resolve(token, null));
+   }
+
+   /*******************************************************************************
+    ** Recheck the binding against the same transaction used for suppression.
+    *******************************************************************************/
+   private QRecord resolve(String token, QBackendTransaction transaction) throws QException
    {
       JSONObject payload = EmailUnsubscribeLinks.verify(token);
       if(payload == null)
@@ -55,13 +59,18 @@ public final class EmailUnsubscribe
       }
       try
       {
-         QRecord message = EmailStore.get(EmailTables.MESSAGE, Integer.valueOf(payload.getString("messageId")), null);
+         QRecord message = EmailStore.get(EmailTables.MESSAGE, Integer.valueOf(payload.getString("messageId")), transaction);
          if(message == null || !payload.getString("category").equals(message.getValueString("category")))
          {
             return (null);
          }
-         String recipients = message.getValueString("toAddresses") + "," + message.getValueString("ccAddresses") + "," + message.getValueString("bccAddresses");
-         return (WebhookVerification.equal(payload.getString("addressHash"), WebhookVerification.hash(recipients.getBytes(StandardCharsets.UTF_8))) ? message : null);
+         String recipient = EmailUnsubscribeLinks.recipient(message.getValueString("toAddresses"), message.getValueString("ccAddresses"), message.getValueString("bccAddresses"));
+         String hash = payload.getString("addressHash");
+         // Safe legacy links remain valid only after the single-mailbox check above.
+         String legacyEnvelope = message.getValueString("toAddresses") + "," + message.getValueString("ccAddresses") + "," + message.getValueString("bccAddresses");
+         boolean matches = WebhookVerification.equal(hash, WebhookVerification.hash(recipient.getBytes(StandardCharsets.UTF_8)))
+            || WebhookVerification.equal(hash, WebhookVerification.hash(legacyEnvelope.getBytes(StandardCharsets.UTF_8)));
+         return (matches ? message : null);
       }
       catch(IllegalArgumentException | org.json.JSONException e)
       {
@@ -70,7 +79,7 @@ public final class EmailUnsubscribe
    }
 
    /*******************************************************************************
-    ** The legacy token binds the complete envelope, so opt out every bound mailbox.
+    ** Opt out only the signed mailbox; reject changed or multi-recipient envelopes.
     ** Never display those addresses on the public page or emit them to logs.
     *******************************************************************************/
    public void unsubscribe(String token) throws QException
@@ -83,51 +92,22 @@ public final class EmailUnsubscribe
       try(QBackendTransaction tx = QBackendTransaction.openFor(new UpdateInput(EmailTables.PROVIDER)))
       {
          EmailTrackingStore.lock(initial.getValueInteger("providerId"), tx);
-         QRecord message = EmailStore.get(EmailTables.MESSAGE, initial.getValueInteger("id"), tx);
-         if(message == null || !List.of("MARKETING", "NOTIFICATION").contains(message.getValueString("category")))
+         QRecord message = resolve(token, tx);
+         if(message == null || !initial.getValueInteger("providerId").equals(message.getValueInteger("providerId")))
          {
             throw (new IllegalArgumentException("Invalid unsubscribe link"));
          }
-         for(String recipient : recipients(message))
+         String recipient = EmailUnsubscribeLinks.recipient(message.getValueString("toAddresses"), message.getValueString("ccAddresses"), message.getValueString("bccAddresses"));
+         String key = "unsubscribe:" + message.getValueInteger("id") + ":" + WebhookVerification.hash(recipient.getBytes(StandardCharsets.UTF_8));
+         var event = new EmailEventParser.Event(key, message.getValueString("id"), null, "UNSUBSCRIBED", null, recipient, EmailRuntime.clock().instant(), null, null);
+         QRecord stored = EmailTrackingStore.event(message, event, key, tx);
+         if(stored == null)
          {
-            String key = "unsubscribe:" + message.getValueInteger("id") + ":" + WebhookVerification.hash(recipient.getBytes(StandardCharsets.UTF_8));
-            var event = new EmailEventParser.Event(key, message.getValueString("id"), null, "UNSUBSCRIBED", null, recipient, EmailRuntime.clock().instant(), null, null);
-            QRecord stored = EmailTrackingStore.event(message, event, key, tx);
-            if(stored == null)
-            {
-               stored = com.kingsrook.qbits.email.support.SystemWrites.query(EmailTables.EVENT, EmailStore.equal("eventKey", key), tx).getFirst();
-            }
-            EmailTrackingStore.suppress(message, stored, message.getValueString("category"), "UNSUBSCRIBE", tx);
+            stored = com.kingsrook.qbits.email.support.SystemWrites.query(EmailTables.EVENT, EmailStore.equal("eventKey", key), tx).getFirst();
          }
+         EmailTrackingStore.suppress(message, stored, message.getValueString("category"), "UNSUBSCRIBE", tx);
          tx.commit();
       }
-   }
-
-   /*******************************************************************************
-    ** RFC mailbox parsing preserves quoted display names and deduplicates mailboxes.
-    *******************************************************************************/
-   private static Set<String> recipients(QRecord message)
-   {
-      Set<String> recipients = new LinkedHashSet<>();
-      try
-      {
-         for(String field : List.of("toAddresses", "ccAddresses", "bccAddresses"))
-         {
-            String value = message.getValueString(field);
-            if(value != null && !value.isBlank())
-            {
-               for(InternetAddress address : InternetAddress.parse(value, true))
-               {
-                  recipients.add(EmailTrackingStore.address(address.getAddress()));
-               }
-            }
-         }
-      }
-      catch(Exception e)
-      {
-         throw (new IllegalArgumentException("Invalid unsubscribe recipients"));
-      }
-      return (recipients);
    }
 
    /*******************************************************************************

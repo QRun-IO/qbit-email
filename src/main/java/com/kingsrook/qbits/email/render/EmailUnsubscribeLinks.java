@@ -27,9 +27,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.Locale;
 import java.util.Map;
 import com.kingsrook.qbits.email.EmailRuntime;
 import com.kingsrook.qbits.email.template.VariableSchema;
+import jakarta.mail.internet.InternetAddress;
 
 
 /*******************************************************************************
@@ -45,29 +47,38 @@ public final class EmailUnsubscribeLinks
    }
 
    /*******************************************************************************
-    ** Bind the message, recipient-envelope hash and category without exposing PII.
+    ** Bind the message, single mailbox hash and category without exposing PII.
     ** No key means no link/header; marketing must refuse rather than omit opt-out.
     *******************************************************************************/
-   public static String create(String messageId, String recipients, String category)
+   public static String create(String messageId, String recipient, String category)
    {
       if(!"NOTIFICATION".equals(category) && !"MARKETING".equals(category))
       {
          return (null);
       }
+      String key;
       try
       {
-         String key = EmailRuntime.config().getSecretResolver().apply("QQQ_EMAIL_UNSUBSCRIBE_KEY");
-         String base = EmailRuntime.config().getPublicBaseUrl();
-         if(key == null || key.isBlank() || base == null || base.isBlank())
+         key = EmailRuntime.config().getSecretResolver().apply("QQQ_EMAIL_UNSUBSCRIBE_KEY");
+      }
+      catch(Exception e)
+      {
+         throw (new IllegalArgumentException("Opt-out email needs publicBaseUrl and QQQ_EMAIL_UNSUBSCRIBE_KEY"));
+      }
+      String base = EmailRuntime.config().getPublicBaseUrl();
+      if(key == null || key.isBlank() || base == null || base.isBlank())
+      {
+         if("MARKETING".equals(category))
          {
-            if("MARKETING".equals(category))
-            {
-               throw (new IllegalArgumentException());
-            }
-            return (null);
+            throw (new IllegalArgumentException("Opt-out email needs publicBaseUrl and QQQ_EMAIL_UNSUBSCRIBE_KEY"));
          }
+         return (null);
+      }
+      String address = recipient(recipient, null, null);
+      try
+      {
          VariableSchema.url(base);
-         String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(recipients.getBytes(StandardCharsets.UTF_8)));
+         String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(address.getBytes(StandardCharsets.UTF_8)));
          String payload = Base64.getUrlEncoder().withoutPadding().encodeToString(VariableSchema.json(Map.of("messageId", messageId, "addressHash", hash, "category", category)).getBytes(StandardCharsets.UTF_8));
          Mac mac = Mac.getInstance("HmacSHA256");
          mac.init(new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
@@ -82,7 +93,29 @@ public final class EmailUnsubscribeLinks
    }
 
    /*******************************************************************************
-    ** Verify the existing envelope-bound format before any lookup or side effect.
+    ** Exactly one To mailbox, canonicalized for signing and category suppression.
+    *******************************************************************************/
+   public static String recipient(String to, String cc, String bcc)
+   {
+      try
+      {
+         InternetAddress[] addresses = InternetAddress.parse(to == null ? "" : to, true);
+         if(addresses.length == 1 && !addresses[0].isGroup() && addresses[0].getAddress().contains("@")
+            && (cc == null || cc.isBlank()) && (bcc == null || bcc.isBlank()))
+         {
+            addresses[0].validate();
+            return (addresses[0].getAddress().toLowerCase(Locale.ROOT));
+         }
+      }
+      catch(jakarta.mail.internet.AddressException e)
+      {
+         // Malformed stored envelopes cannot authorize an opt-out.
+      }
+      throw (new IllegalArgumentException("Notification and marketing email with an unsubscribe link goes to one recipient per message; send one message per recipient."));
+   }
+
+   /*******************************************************************************
+    ** Verify the signed format before any lookup or side effect.
     ** Invalid and non-opt-out categories are indistinguishable to callers.
     *******************************************************************************/
    public static org.json.JSONObject verify(String token)

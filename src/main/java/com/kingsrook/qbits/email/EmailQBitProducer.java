@@ -155,6 +155,10 @@ public class EmailQBitProducer implements QBitMetaDataProducer<EmailQBitConfig>
          {
             table.withCustomizer(TableCustomizers.POST_QUERY_RECORD, new QCodeReference(EmailTableCustomizers.MessageLinksCustomizer.class));
          }
+         if(EmailTables.VERSION.equals(table.getName()))
+         {
+            table.withCustomizer(TableCustomizers.POST_QUERY_RECORD, new QCodeReference(com.kingsrook.qbits.email.template.EmailVersionLabels.class));
+         }
          if(EmailTables.PROVIDER.equals(table.getName()))
          {
             table.withCustomizer(TableCustomizers.POST_QUERY_RECORD, new QCodeReference(EmailTableCustomizers.ProviderCustomizer.class));

@@ -108,8 +108,12 @@ public class EmailPreviewWidget extends AbstractWidgetRenderer
       document.select("img").forEach(e -> e.attr("style", "max-width:100%;height:auto"));
       document.select("pre").forEach(e -> e.attr("style", "white-space:pre-wrap;overflow-wrap:anywhere"));
       document.select("a").forEach(e -> e.attr("style", "color:inherit;overflow-wrap:anywhere"));
-      document.select(".email-button").forEach(e -> e.attr("style", "padding:12px 20px;background-color:" + ContrastCheck.color(brand, dark ? "darkPrimaryColor" : "primaryColor")));
-      document.select(".email-button a").forEach(e -> e.attr("style", "color:" + ContrastCheck.color(brand, dark ? "darkButtonTextColor" : "buttonTextColor")));
+      document.select(".email-content").forEach(e -> e.attr("style", e.attr("style") + ";background-color:"
+         + ContrastCheck.color(brand, dark ? "darkBackgroundColor" : "backgroundColor") + ";color:"
+         + ContrastCheck.color(brand, dark ? "darkTextColor" : "textColor")));
+      document.select(".email-button").forEach(e -> e.attr("style", "padding:12px 20px;background-color:" + ContrastCheck.color(brand, dark ? "darkPrimaryColor" : "primaryColor")
+         + ";color:" + ContrastCheck.color(brand, dark ? "darkButtonTextColor" : "buttonTextColor") + "!important"));
+      document.select(".email-button a").forEach(e -> e.attr("style", "color:" + ContrastCheck.color(brand, dark ? "darkButtonTextColor" : "buttonTextColor") + "!important;display:block;overflow-wrap:anywhere"));
       document.select("[class]").forEach(e -> e.removeAttr("class"));
       return ("<h4>" + (dark ? "Dark" : "Light") + " · " + width + "px maximum</h4><div style=\"box-sizing:border-box;width:100%;max-width:"
          + width + "px;padding:12px;overflow-wrap:anywhere;background-color:" + ContrastCheck.color(brand, dark ? "darkBackgroundColor" : "backgroundColor")

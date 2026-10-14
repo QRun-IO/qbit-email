@@ -61,7 +61,8 @@ public final class ContrastCheck
             case "backgroundColor", "buttonTextColor", "darkTextColor" -> "#ffffff";
             case "primaryColor" -> "#2459a6";
             case "darkPrimaryColor" -> color(brand, "primaryColor");
-            case "darkButtonTextColor" -> color(brand, "buttonTextColor");
+            case "darkButtonTextColor" -> ratio(color(brand, "buttonTextColor"), color(brand, "darkPrimaryColor")) >= 4.5
+               ? color(brand, "buttonTextColor") : ratio("#000000", color(brand, "darkPrimaryColor")) >= 4.5 ? "#000000" : "#ffffff";
             default -> "#171717";
          };
       }

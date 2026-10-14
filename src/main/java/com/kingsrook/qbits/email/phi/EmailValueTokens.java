@@ -27,14 +27,13 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.HexFormat;
 import java.util.List;
 import com.kingsrook.qbits.email.EmailRuntime;
 import com.kingsrook.qqq.backend.core.model.metadata.fields.QFieldMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
+import com.kingsrook.qqq.backend.core.utils.ValueUtils;
 
 
 /*******************************************************************************
@@ -56,7 +55,7 @@ public final class EmailValueTokens
     *******************************************************************************/
    public static String forRecordField(QTableMetaData table, QFieldMetaData field, Serializable pk, Serializable value)
    {
-      return (token(List.of(table.getName(), field.getName(), canonical(pk)), value));
+      return (token(List.of(table.getName(), field.getName(), String.valueOf(pk)), value));
    }
 
    /*******************************************************************************
@@ -82,7 +81,7 @@ public final class EmailValueTokens
    /*******************************************************************************
     ** Verify only a genuine keyed token, with constant-time comparison.
     *******************************************************************************/
-   public static boolean verifyRecordField(String token, QTableMetaData table, QFieldMetaData field, Serializable pk, Serializable value)
+   public static boolean verifyRecordField(QTableMetaData table, QFieldMetaData field, Serializable pk, Serializable value, String token)
    {
       return (matches(token, forRecordField(table, field, pk, value)));
    }
@@ -90,7 +89,7 @@ public final class EmailValueTokens
    /*******************************************************************************
     ** Verify a context token, never changed or shred markers.
     *******************************************************************************/
-   public static boolean verifyContext(String token, List<String> bindingParts, Serializable value)
+   public static boolean verifyContext(List<String> bindingParts, Serializable value, String token)
    {
       return (matches(token, forContext(bindingParts, value)));
    }
@@ -104,11 +103,7 @@ public final class EmailValueTokens
       {
          return (decimal.stripTrailingZeros().toPlainString());
       }
-      if(value instanceof Instant instant)
-      {
-         return (instant.toString());
-      }
-      return (value == null ? "null" : value.toString());
+      return (ValueUtils.getValueAsString(value));
    }
 
    /*******************************************************************************
@@ -124,7 +119,11 @@ public final class EmailValueTokens
             return (changed());
          }
          byte[] key = Base64.getDecoder().decode(secret);
-         String keyId = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(key)).substring(0, 8);
+         String keyId = EmailRuntime.config().getSecretResolver().apply("QQQ_AUDIT_HMAC_KEY_ID");
+         if(keyId == null || keyId.isBlank())
+         {
+            keyId = "env1";
+         }
          Mac mac = Mac.getInstance("HmacSHA256");
          mac.init(new SecretKeySpec(key, "HmacSHA256"));
          List<String> binding = new ArrayList<>(parts);

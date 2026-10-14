@@ -308,22 +308,76 @@ class EmailWebhookRoutesTest
    }
 
    /*******************************************************************************
-    ** Existing envelope-bound links cover To/Cc/Bcc and repeat POST restores opt-out.
+    ** One signed mailbox is suppressed, while repeat POST restores its opt-out.
     *******************************************************************************/
    @Test
-   void unsubscribeEnvelopeAndRepeatedSuppression() throws Exception
+   void unsubscribeSingleRecipientAndRepeatedSuppression() throws Exception
    {
-      QRecord message = message(provider("POSTMARK"));
-      message.withValue("ccAddresses", "Copy <copy@example.com>").withValue("bccAddresses", "blind@example.com").withValue("category", "NOTIFICATION");
+      QRecord provider = provider("POSTMARK");
+      QRecord message = message(provider);
+      message.withValue("toAddresses", "\"Recipient, One\" <Recipient@example.com>").withValue("category", "NOTIFICATION");
       SystemWrites.updateOne(EmailTables.MESSAGE, message);
-      String path = "/unsubscribe/" + token(message);
+      QRecord other = message(provider);
+      SystemWrites.updateOne(EmailTables.MESSAGE, other.withValue("toAddresses", "other@example.com"));
+      String signed = token(message);
+      assertThat(EmailUnsubscribeLinks.verify(signed).getString("addressHash"))
+         .isEqualTo(WebhookVerification.hash("recipient@example.com".getBytes(StandardCharsets.UTF_8)));
+      String path = "/unsubscribe/" + signed;
       assertThat(request(path, "POST", "confirm=unsubscribe").statusCode()).isEqualTo(200);
-      assertThat(H2Support.all(EmailTables.SUPPRESSION)).hasSize(3).allSatisfy(row -> assertThat(row.getValueString("scope")).isEqualTo("NOTIFICATION"));
-      assertThat(H2Support.all(EmailTables.EVENT)).hasSize(3);
+      assertThat(H2Support.all(EmailTables.SUPPRESSION)).hasSize(1).allSatisfy(row ->
+      {
+         assertThat(row.getValueString("scope")).isEqualTo("NOTIFICATION");
+         assertThat(row.getValueString("address")).isEqualTo("recipient@example.com");
+      });
+      assertThat(H2Support.all(EmailTables.EVENT)).hasSize(1);
       SystemWrites.delete(EmailTables.SUPPRESSION, new com.kingsrook.qqq.backend.core.model.actions.tables.query.QQueryFilter());
       assertThat(request(path, "POST", "List-Unsubscribe=One-Click").statusCode()).isEqualTo(200);
-      assertThat(H2Support.all(EmailTables.SUPPRESSION)).hasSize(3);
-      assertThat(H2Support.all(EmailTables.EVENT)).hasSize(3);
+      assertThat(H2Support.all(EmailTables.SUPPRESSION)).hasSize(1);
+      assertThat(H2Support.all(EmailTables.EVENT)).hasSize(1);
+   }
+
+   /*******************************************************************************
+    ** Legacy single-recipient links keep working; legacy multi-recipient links fail closed.
+    *******************************************************************************/
+   @Test
+   void legacyUnsubscribeRequiresSingleRecipient() throws Exception
+   {
+      QRecord message = message(provider("POSTMARK"));
+      String safe = legacyToken(message);
+      assertThat(request("/unsubscribe/" + safe, "GET", null).statusCode()).isEqualTo(200);
+      for(String field : List.of("toAddresses", "ccAddresses", "bccAddresses"))
+      {
+         QRecord changed = new QRecord().withValue("id", message.getValue("id")).withValue("toAddresses", "recipient@example.com")
+            .withValue("ccAddresses", null).withValue("bccAddresses", null)
+            .withValue(field, "toAddresses".equals(field) ? "recipient@example.com, other@example.com" : "other@example.com");
+         SystemWrites.updateOne(EmailTables.MESSAGE, changed);
+         changed.withValue("category", "MARKETING");
+         String legacy = legacyToken(changed);
+         for(String signed : List.of(safe, legacy))
+         {
+            assertThat(request("/unsubscribe/" + signed, "GET", null).statusCode()).isEqualTo(404);
+            assertThat(request("/unsubscribe/" + signed, "POST", "List-Unsubscribe=One-Click").statusCode()).isEqualTo(404);
+         }
+      }
+      assertThat(H2Support.all(EmailTables.SUPPRESSION)).isEmpty();
+      assertThat(H2Support.all(EmailTables.EVENT)).isEmpty();
+      SystemWrites.updateOne(EmailTables.MESSAGE, message.withValue("ccAddresses", null).withValue("bccAddresses", null));
+      assertThat(request("/unsubscribe/" + safe, "POST", "List-Unsubscribe=One-Click").statusCode()).isEqualTo(200);
+      assertThat(H2Support.all(EmailTables.SUPPRESSION)).hasSize(1);
+   }
+
+   /*******************************************************************************
+    ** Reproduce the old signature without relying on the current signer's validation.
+    *******************************************************************************/
+   private static String legacyToken(QRecord message) throws Exception
+   {
+      String envelope = message.getValueString("toAddresses") + "," + message.getValueString("ccAddresses") + "," + message.getValueString("bccAddresses");
+      JSONObject payload = new JSONObject().put("messageId", message.getValueString("id")).put("category", message.getValueString("category"))
+         .put("addressHash", WebhookVerification.hash(envelope.getBytes(StandardCharsets.UTF_8)));
+      String signed = "v1." + Base64.getUrlEncoder().withoutPadding().encodeToString(payload.toString().getBytes(StandardCharsets.UTF_8));
+      javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+      mac.init(new javax.crypto.spec.SecretKeySpec(SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+      return (signed + "." + Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(signed.getBytes(StandardCharsets.UTF_8))));
    }
 
    /*******************************************************************************
@@ -447,11 +501,11 @@ class EmailWebhookRoutesTest
    }
 
    /*******************************************************************************
-    ** Existing signing format covers null CC/BCC strings exactly as enqueue does.
+    ** Sign the same single To mailbox as enqueue.
     *******************************************************************************/
    private static String token(QRecord message)
    {
-      String url = EmailUnsubscribeLinks.create(message.getValueString("id"), message.getValueString("toAddresses") + "," + message.getValueString("ccAddresses") + "," + message.getValueString("bccAddresses"), message.getValueString("category"));
+      String url = EmailUnsubscribeLinks.create(message.getValueString("id"), message.getValueString("toAddresses"), message.getValueString("category"));
       assertThat(url).startsWith("https://app.example.com" + BASE + "/unsubscribe/");
       return (url.substring(url.lastIndexOf('/') + 1));
    }

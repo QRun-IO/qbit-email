@@ -285,7 +285,7 @@ id, or unsaved source, plus variables) returns subject, html, text and warnings.
   dates are populated by phase-(c) events; home totals count those recipient events.
 - Part 2 signs opt-out links and prepares headers; phase (c) now serves the receiver. Without its key/base URL, notification omits opt-out links and
   headers, while marketing refuses as specified in 8.2. Do not use opt-out delivery
-  without a receiving handler. The token's address hash covers the recipient envelope.
+  without a receiving handler. The token's address hash binds the single recipient mailbox.
 
 ## 6. Delivery tracking
 
@@ -323,9 +323,9 @@ content), url (clicks only). Opens and clicks are stored only when the provider 
   ids retry (including callbacks before SENT); unsupported event kinds are ignored.
 - Opens/clicks require current provider flags and are also dropped for PHI-approved
   messages. Event details mask addresses before truncation to 500 characters.
-- The v1 unsubscribe signer remains envelope-bound. A valid POST suppresses all bound
-  To/Cc/Bcc mailboxes for MARKETING/NOTIFICATION; the page never displays addresses.
-  Use one recipient per opt-out send for individual preference control.
+- The unsubscribe signer binds one mailbox. A valid POST suppresses only that address
+  for MARKETING/NOTIFICATION; the page never displays addresses. Legacy links remain
+  valid only for messages with one To recipient and no Cc/Bcc.
 - PostgreSQL and H2 definitions, crypto fixtures and real random-port Javalin tests
   are included. Certificate caching is memory-only. Setup is in `PROVIDERS.md`.
 
@@ -384,6 +384,7 @@ MANUAL), source_message_id, source_event_id, note, created_date, expires_date (o
   respects HARD_BOUNCE and COMPLAINT.
 
 ### 8.2 One-click unsubscribe (RFC 8058, RFC 2369)
+- NOTIFICATION or MARKETING messages carrying an unsubscribe link/header must have exactly one To recipient and no Cc/Bcc; send one message per recipient.
 - MARKETING and NOTIFICATION messages carry
   `List-Unsubscribe: <https://{publicBaseUrl}/qqq/hooks/email/unsubscribe/{token}>` and
   `List-Unsubscribe-Post: List-Unsubscribe=One-Click`, and the footer links to the same URL.

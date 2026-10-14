@@ -36,6 +36,7 @@ import com.kingsrook.qbits.email.metadata.EmailTableCustomizers;
 import com.kingsrook.qbits.email.metadata.EmailTables;
 import com.kingsrook.qbits.email.permissions.EmailPermissionChecker;
 import com.kingsrook.qbits.email.permissions.EmailPermissions;
+import com.kingsrook.qbits.email.render.EmailUnsubscribeLinks;
 import com.kingsrook.qbits.email.support.EmailStore;
 import com.kingsrook.qbits.email.support.SystemWrites;
 import com.kingsrook.qbits.email.template.EmailTemplateRenderer;
@@ -187,6 +188,18 @@ public final class EmailService
       {
          return (refused("One or more email addresses are invalid"));
       }
+      try
+      {
+         String unsubscribe = EmailUnsubscribeLinks.create("pending", String.join(",", to), category.name());
+         if(unsubscribe != null || retained != null && retained.getValueString("unsubscribeUrl") != null)
+         {
+            EmailUnsubscribeLinks.recipient(String.join(",", to), String.join(",", cc), String.join(",", bcc));
+         }
+      }
+      catch(IllegalArgumentException e)
+      {
+         return (refused(e.getMessage()));
+      }
       if(to.isEmpty() && cc.isEmpty() && bcc.isEmpty())
       {
          return (refused("At least one recipient is required"));
@@ -242,14 +255,6 @@ public final class EmailService
       if(templateContent != null)
       {
          row.getValues().putAll(templateContent.getValues());
-      }
-      try
-      {
-         com.kingsrook.qbits.email.render.EmailUnsubscribeLinks.create("pending", String.join(",", to), category.name());
-      }
-      catch(IllegalArgumentException e)
-      {
-         return (refused(e.getMessage()));
       }
       for(var field : config.getSecurityFields())
       {
@@ -389,10 +394,10 @@ public final class EmailService
       try
       {
          String unsubscribe = row.getValueString("unsubscribeUrl");
-         if(unsubscribe == null && (templateRenderer != null || !Boolean.TRUE.equals(row.getValueBoolean("phiApproved"))))
+         if(unsubscribe == null && !"SUPPRESSED".equals(row.getValueString("status"))
+            && (templateRenderer != null || !Boolean.TRUE.equals(row.getValueBoolean("phiApproved"))))
          {
-            unsubscribe = com.kingsrook.qbits.email.render.EmailUnsubscribeLinks.create(inserted.getValueString("id"),
-               row.getValueString("toAddresses") + "," + row.getValueString("ccAddresses") + "," + row.getValueString("bccAddresses"), row.getValueString("category"));
+            unsubscribe = EmailUnsubscribeLinks.create(inserted.getValueString("id"), row.getValueString("toAddresses"), row.getValueString("category"));
          }
          QRecord content;
          if(templateRenderer != null)

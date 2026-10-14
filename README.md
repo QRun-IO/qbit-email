@@ -363,6 +363,14 @@ DELIVERED. Optional `email.complaint` alerts warn after more than three complain
 in 24 hours, with daily deduplication. Provider details mask addresses and are capped
 at 500 characters; raw authenticated inbox payloads are sensitive DB data.
 
+NOTIFICATION and MARKETING messages with unsubscribe configured require exactly one
+To recipient and no Cc/Bcc; send one message per recipient. The token binds that
+mailbox, and an unsubscribe POST suppresses only that address for the message's
+category. Multi-recipient requests are refused before suppression filtering.
+TRANSACTIONAL and SECURITY messages, and NOTIFICATION messages without unsubscribe
+configured, may still have multiple recipients. Existing single-recipient links
+remain valid; old multi-recipient links are rejected.
+
 ## Core messaging bridge
 
 The producer adds messaging provider `qbitEmail` (configurable), type `QBIT_EMAIL`.

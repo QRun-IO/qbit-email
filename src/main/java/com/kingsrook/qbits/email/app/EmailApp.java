@@ -64,8 +64,6 @@ public final class EmailApp
    {
       return (List.of(
          widget(HOME_WIDGET, "Overview", WidgetType.HTML.getType(), HomeRenderer.class),
-         widget("emailHourly", "Sends per hour - 24h", WidgetType.LINE_CHART.getType(), HomeRenderer.class),
-         widget("emailSuppressionGrowth", "Suppression growth - 30 days", WidgetType.LINE_CHART.getType(), HomeRenderer.class),
          widget("emailTemplatePreview", "Preview", WidgetType.HTML.getType(), com.kingsrook.qbits.email.template.EmailPreviewWidget.class)));
 
    }
@@ -82,7 +80,7 @@ public final class EmailApp
          .withLabel(config.getAppLabel())
          .withIcon(new QIcon("mail"))
          .withPermissionRules(EmailTables.permissionRules())
-         .withWidgets(List.of(HOME_WIDGET, "emailHourly", "emailSuppressionGrowth"));
+         .withWidgets(List.of(HOME_WIDGET));
       for(String name : EmailTables.MAIN)
       {
          if(tables.containsKey(name))
@@ -106,12 +104,7 @@ public final class EmailApp
       @Override
       public RenderWidgetOutput render(RenderWidgetInput input) throws QException
       {
-         return (new RenderWidgetOutput(switch(input.getWidgetMetaData().getName())
-            {
-               case "emailHourly" -> EmailHome.hourly();
-               case "emailSuppressionGrowth" -> EmailHome.suppressions();
-               default -> EmailHome.overview();
-            }));
+         return (new RenderWidgetOutput(EmailHome.overview()));
       }
    }
 

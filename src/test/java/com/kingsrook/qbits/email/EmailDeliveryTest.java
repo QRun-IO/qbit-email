@@ -584,6 +584,48 @@ class EmailDeliveryTest
    }
 
    /*******************************************************************************
+    ** Opt-out messages are one mailbox per send, before suppression can trim them.
+    *******************************************************************************/
+   @ParameterizedTest
+   @ValueSource(strings = {"NOTIFICATION", "MARKETING"})
+   void unsubscribeRequiresOneToRecipient(String category) throws Exception
+   {
+      EmailRuntime.config().withPublicBaseUrl("https://app.example.com").withSecretResolver(name -> "test-unsubscribe-key");
+      H2Support.insert(EmailTables.BRAND, new QRecord().withValue("name", "postal").withValue("isDefault", true).withValue("postalAddress", "123 Test Street"));
+      for(EmailRequest invalid : List.of(request().withTo(List.of("person@example.com", "other@example.com")),
+         request().withTo("person@example.com, other@example.com"), request().withCc("other@example.com"),
+         request().withBcc("other@example.com"), request().withTo(List.of()).withCc("other@example.com"),
+         request().withTo(List.of()).withBcc("other@example.com"), request().withTo(List.of()), request().withCc("person@example.com")))
+      {
+         var result = EmailService.send(invalid.withCategory(EmailCategory.valueOf(category)));
+         assertThat(result.status()).isEqualTo(EmailSendResult.Status.REFUSED);
+         assertThat(result.reasons()).containsExactly("Notification and marketing email with an unsubscribe link goes to one recipient per message; send one message per recipient.");
+      }
+      H2Support.insert(EmailTables.SUPPRESSION, new QRecord().withValue("address", "other@example.com").withValue("scope", "ALL").withValue("reason", "HARD_BOUNCE"));
+      assertThat(EmailService.send(request().withCc("other@example.com").withCategory(EmailCategory.valueOf(category))).status()).isEqualTo(EmailSendResult.Status.REFUSED);
+      assertThat(H2Support.all(EmailTables.MESSAGE)).isEmpty();
+   }
+
+   /*******************************************************************************
+    ** Transactional mail and notification mail without opt-out retain multi-party delivery.
+    *******************************************************************************/
+   @Test
+   void multiRecipientWithoutUnsubscribeStillQueues() throws Exception
+   {
+      EmailRuntime.config().withPublicBaseUrl("https://app.example.com").withSecretResolver(name -> "test-unsubscribe-key");
+      var result = EmailService.send(request().withTo(List.of("person@example.com, other@example.com")).withCc("copy@example.com").withBcc("blind@example.com"));
+      assertThat(result.status()).isEqualTo(EmailSendResult.Status.QUEUED);
+      assertThat(message(result.messageId()).getValueString("unsubscribeUrl")).isNull();
+      assertThat(new EmailDispatcher().runOnce().sent()).isEqualTo(1);
+      assertThat(mail.getReceivedMessages()).hasSize(4);
+      assertThat(mail.getReceivedMessages()[0].getAllRecipients()).hasSize(3);
+      EmailRuntime.config().withSecretResolver(name -> null);
+      result = EmailService.send(request().withCc("copy@example.com").withBcc("blind@example.com").withCategory(EmailCategory.NOTIFICATION));
+      assertThat(result.status()).isEqualTo(EmailSendResult.Status.QUEUED);
+      assertThat(message(result.messageId()).getValueString("unsubscribeUrl")).isNull();
+   }
+
+   /*******************************************************************************
     ** Rate Limits Do Not Consume Attempts And Send After Is Honored.
     *******************************************************************************/
    @Test
