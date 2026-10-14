@@ -81,7 +81,17 @@ class PhiCanaryEgressTest
    @BeforeEach
    void setup() throws Exception
    {
-      canary = "CANARY-PHI-" + UUID.randomUUID();
+      ////////////////////////////////////////////////////////////////////////
+      // the random part is mapped from hex to the letters g-v: a five-char //
+      // window of a hex canary could match any hex digest (body hashes,    //
+      // Message-IDs) by chance; these windows can only match real leakage  //
+      ////////////////////////////////////////////////////////////////////////
+      StringBuilder random = new StringBuilder();
+      for(char c : UUID.randomUUID().toString().replace("-", "").toCharArray())
+      {
+         random.append((char) ('g' + Character.digit(c, 16)));
+      }
+      canary = "CANARY-PHI-" + random;
       H2Support.setup(c -> c.withMaxAttempts(2).withSecretResolver(PhiCanaryEgressTest::secret)
          .withClassificationOverrides(Map.of("test_patient.name", EmailClassifications.Level.PHI)));
       H2Support.provider(25);

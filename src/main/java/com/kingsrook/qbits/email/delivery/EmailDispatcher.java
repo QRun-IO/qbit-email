@@ -451,7 +451,7 @@ public class EmailDispatcher
     *******************************************************************************/
    private static EmailEnvelope envelope(QRecord message)
    {
-      return (new EmailEnvelope().withMessageId(message.getValueString("id")).withFrom(message.getValueString("fromAddress"))
+      return (new EmailEnvelope().withMessageId(message.getValueString("id")).withRfcMessageId(message.getValueString("rfcMessageId")).withFrom(message.getValueString("fromAddress"))
          .withTo(split(message.getValueString("toAddresses"))).withCc(split(message.getValueString("ccAddresses"))).withBcc(split(message.getValueString("bccAddresses")))
          .withReplyTo(message.getValueString("replyTo")).withSubject(content(message, "subject"))
          .withHtmlBody(content(message, "htmlBody"))

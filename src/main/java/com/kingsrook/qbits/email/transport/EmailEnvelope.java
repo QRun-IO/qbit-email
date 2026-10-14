@@ -31,6 +31,7 @@ import java.util.Map;
 public class EmailEnvelope
 {
    private String messageId;
+   private String rfcMessageId;
    private String from;
    private List<String> to = List.of();
    private List<String> cc = List.of();
@@ -58,6 +59,27 @@ public class EmailEnvelope
    public EmailEnvelope withMessageId(String messageId)
    {
       this.messageId = messageId;
+      return (this);
+   }
+
+
+
+   /*******************************************************************************
+    ** Getter for the persisted RFC 5322 Message-ID, distinct from the outbox row id.
+    *******************************************************************************/
+   public String getRfcMessageId()
+   {
+      return (rfcMessageId);
+   }
+
+
+
+   /*******************************************************************************
+    ** Fluent setter for the persisted RFC 5322 Message-ID.
+    *******************************************************************************/
+   public EmailEnvelope withRfcMessageId(String rfcMessageId)
+   {
+      this.rfcMessageId = rfcMessageId;
       return (this);
    }
 

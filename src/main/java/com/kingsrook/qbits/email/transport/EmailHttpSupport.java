@@ -81,13 +81,17 @@ final class EmailHttpSupport
       Map<String, String> headers = new LinkedHashMap<>();
       envelope.getHeaders().forEach((name, value) ->
       {
-         if(!name.equalsIgnoreCase("Bcc") && !name.equalsIgnoreCase("Auto-Submitted") && !name.equalsIgnoreCase("X-QQQ-Email-Id"))
+         if(!name.equalsIgnoreCase("Bcc") && !name.equalsIgnoreCase("Auto-Submitted") && !name.equalsIgnoreCase("X-QQQ-Email-Id") && !name.equalsIgnoreCase("Message-ID"))
          {
             headers.put(name, value);
          }
       });
       headers.put("Auto-Submitted", "auto-generated");
       headers.put("X-QQQ-Email-Id", envelope.getMessageId());
+      if(envelope.getRfcMessageId() != null)
+      {
+         headers.put("Message-ID", envelope.getRfcMessageId());
+      }
       return (headers);
    }
 

@@ -20,20 +20,28 @@
 
 package com.kingsrook.qbits.email;
 
-import java.time.*;
-import java.util.*;
-import com.icegreen.greenmail.util.*;
-import com.kingsrook.qbits.email.delivery.*;
-import com.kingsrook.qbits.email.metadata.*;
-import com.kingsrook.qbits.email.outbox.*;
-import com.kingsrook.qbits.email.processes.*;
-import com.kingsrook.qbits.email.support.*;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.Map;
+import com.icegreen.greenmail.util.GreenMail;
+import com.icegreen.greenmail.util.ServerSetup;
+import com.kingsrook.qbits.email.metadata.EmailTables;
+import com.kingsrook.qbits.email.outbox.EmailRequest;
+import com.kingsrook.qbits.email.outbox.EmailService;
+import com.kingsrook.qbits.email.processes.EmailProcesses;
+import com.kingsrook.qbits.email.support.EmailStore;
+import com.kingsrook.qbits.email.support.SystemWrites;
 import com.kingsrook.qqq.backend.core.actions.processes.RunProcessAction;
 import com.kingsrook.qqq.backend.core.context.QContext;
-import com.kingsrook.qqq.backend.core.model.actions.processes.*;
+import com.kingsrook.qqq.backend.core.model.actions.processes.RunProcessInput;
+import com.kingsrook.qqq.backend.core.model.actions.processes.RunProcessOutput;
 import com.kingsrook.qqq.backend.core.model.data.QRecord;
-import org.junit.jupiter.api.*;
-import static org.assertj.core.api.Assertions.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /*******************************************************************************
  ** Email Processes Test.

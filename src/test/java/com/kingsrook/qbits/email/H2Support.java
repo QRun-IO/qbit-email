@@ -85,7 +85,7 @@ public final class H2Support
     *******************************************************************************/
    public static QInstance instance(RDBMSBackendMetaData backend, Consumer<EmailQBitConfig> tweak)
          throws Exception
-         {
+   {
       QInstance instance = new QInstance();
       instance.withInstanceDefaultAuthentication(
             new QAuthenticationMetaData()
