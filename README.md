@@ -202,6 +202,18 @@ EmailApiResult result = EmailApi.send(new EmailApiRequest()
 
 `EmailApi.ensureTemplate(EmailApiTemplate)` creates a template once; see
 [Templates from another qbit](#templates-from-another-qbit).
+
+For durable job effects, use `EmailApi.sendOnce(request, effectKey)`. It assigns
+the effect key as the request's idempotency key and returns `EmailApiEffectResult`
+with `EmailApiEffectOutcome.QUEUED_OR_DUPLICATE` or `REFUSED` and a nullable
+`EmailApiMessage`. Success means the outbox has committed; duplicate handoffs return
+the same row and RFC Message-ID. Null requests, null/blank/over-500-character keys,
+conflicting request keys and caller transactions are refused. Suppressed rows remain
+refused on replay and include their audit metadata; refusals without a row have no
+message. Database failures throw `QException` for retry or reconciliation. Ordinary
+`EmailApi.send` accepts `request.withTransaction(transaction, backendName)` when a
+caller-owned or cross-backend deferred enqueue is needed. See [durable job effects](docs/DURABLE-JOBS.md).
+
 `EmailApi.isInstalled(instance)` detects whether the qbit was produced.
 `defaultProviderName(instance)` resolves an enabled configured/default provider;
 `listSenderAddresses(providerName)` lists enabled sender rows (null selects the
@@ -211,12 +223,15 @@ For a PHI-approved template, use `readiness(instance, category, true)` to also c
 the body key and provider PHI/tracking policy. PHI is a template approval state,
 not a category. Readiness is a preflight, not proof that a particular send will pass.
 
-`getMessage(id)` and `findMessagesByIdempotencyKeyPrefix(prefix, limit)` expose only
-id, delivery status, category, idempotency key, provider message id, template name,
+`getMessage(id)`, `getMessageByIdempotencyKey(key)`, `getMessageByRfcMessageId(rfcMessageId)`
+and `findMessagesByIdempotencyKeyPrefix(prefix, limit)` expose only
+id, delivery status, category, idempotency key, RFC Message-ID, provider message id, template name,
 linked table/id and create/sent/delivered timestamps. They never return addresses,
 subjects, bodies or variable snapshots. Prefixes are literal and nonblank; limits
 must be positive; results are ordered by ascending message id. Missing messages
-return an empty Optional/list. Enqueue results have `QUEUED`, `DUPLICATE`,
+return an empty Optional/list. Exact-key lookups also return empty for null/blank
+values; RFC lookup takes the stored bracketed header, not a provider response id.
+Ordinary enqueue results have `QUEUED`, `DUPLICATE`,
 `SUPPRESSED` or `REFUSED`; delivery status is a separate string on `EmailApiMessage`.
 
 Database calls require the caller's initialized `QContext`; methods accepting an
@@ -229,7 +244,9 @@ and lookup arguments throw `IllegalArgumentException`. No secret values are expo
 The API uses only JDK, QQQ core and its own API types in published signatures.
 Changes within a `0.x` minor release line are additive only. Internal packages
 (including runtime, configuration, outbox, metadata, support and template classes)
-are not API and may change. The internal service details below describe host and
+are not API and may change. `EmailEffects`, `EmailEffectOutcome` and `EmailMessageRef`
+are deprecated internals; `EmailApi` is the sole public qbit-email surface.
+The internal service details below describe host and
 qbit-email implementation behavior, not additional cross-qbit contracts.
 
 ## Internal sending service

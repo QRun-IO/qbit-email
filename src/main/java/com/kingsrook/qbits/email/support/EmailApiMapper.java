@@ -70,6 +70,7 @@ public final class EmailApiMapper
          .withBrandName(request.getBrandName())
          .withLocale(request.getLocale())
          .withIdempotencyKey(request.getIdempotencyKey())
+         .withTransaction(request.getTransaction(), request.getTransactionBackendName())
          .withSendAfter(request.getSendAfter())
          .withLinkedTableName(request.getLinkedTableName())
          .withLinkedRecordId(request.getLinkedRecordId())

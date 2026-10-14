@@ -22,8 +22,10 @@ package com.kingsrook.qbits.email.outbox;
 
 
 /*******************************************************************************
+ ** Internal; use EmailApi.
  ** Reconciliation reference without message bodies, recipients or credentials.
  *******************************************************************************/
+@Deprecated(forRemoval = false)
 public record EmailMessageRef(Integer id, String status, String rfcMessageId, String providerMessageId)
 {
 }

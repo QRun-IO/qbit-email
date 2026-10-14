@@ -31,10 +31,12 @@ import com.kingsrook.qqq.backend.core.model.data.QRecord;
 
 
 /*******************************************************************************
+ ** Internal; use EmailApi.
  ** Outbox handoff and system-read reconciliation for trusted effect dispatchers.
  ** This API has no dependency on core durable-job types. Sending retains the
  ** EmailService permission checks; callers must supply a request without a transaction.
  *******************************************************************************/
+@Deprecated(forRemoval = false)
 public final class EmailEffects
 {
    /*******************************************************************************

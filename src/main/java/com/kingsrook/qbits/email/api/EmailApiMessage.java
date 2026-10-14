@@ -28,7 +28,7 @@ import java.time.Instant;
  ** Immutable delivery metadata. No addresses, subject, bodies or variable snapshots.
  ** Status is the persisted delivery state, distinct from EmailApiStatus enqueue outcomes.
  *******************************************************************************/
-public record EmailApiMessage(Integer id, String status, EmailApiCategory category, String idempotencyKey, String providerMessageId,
+public record EmailApiMessage(Integer id, String status, EmailApiCategory category, String idempotencyKey, String rfcMessageId, String providerMessageId,
    String templateName, String linkedTableName, String linkedRecordId, Instant createDate, Instant sentDate, Instant deliveredDate)
 {
 }

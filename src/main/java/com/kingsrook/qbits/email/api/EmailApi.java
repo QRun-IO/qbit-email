@@ -29,6 +29,7 @@ import java.util.function.Function;
 import com.kingsrook.qbits.email.EmailRuntime;
 import com.kingsrook.qbits.email.metadata.EmailTableCustomizers;
 import com.kingsrook.qbits.email.metadata.EmailTables;
+import com.kingsrook.qbits.email.outbox.EmailEffects;
 import com.kingsrook.qbits.email.outbox.EmailService;
 import com.kingsrook.qbits.email.support.EmailApiMapper;
 import com.kingsrook.qbits.email.support.EmailStore;
@@ -58,7 +59,7 @@ import com.kingsrook.qqq.backend.core.model.metadata.QInstance;
  *******************************************************************************/
 public final class EmailApi
 {
-   private static final Set<String> MESSAGE_FIELDS = Set.of("id", "status", "category", "idempotencyKey", "providerMessageId",
+   private static final Set<String> MESSAGE_FIELDS = Set.of("id", "status", "category", "idempotencyKey", "rfcMessageId", "providerMessageId",
       "templateId", "linkedTableName", "linkedRecordId", "createDate", "sentDate", "deliveredDate");
 
 
@@ -95,6 +96,30 @@ public final class EmailApi
 
 
    /*******************************************************************************
+    ** Commit one durable handoff with the effect key as the idempotency key.
+    ** Refuse null requests, blank or over-500-character keys, conflicting keys
+    ** and caller transactions before changing the request. Suppression is REFUSED,
+    ** including replays; a retained audit row is returned. Success acknowledges
+    ** committed storage, not delivery. Database failures propagate as QException.
+    *******************************************************************************/
+   public static EmailApiEffectResult sendOnce(EmailApiRequest request, String effectKey) throws QException
+   {
+      if(request == null || effectKey == null || effectKey.isBlank() || effectKey.length() > 500
+         || request.getTransaction() != null
+         || request.getIdempotencyKey() != null && !request.getIdempotencyKey().equals(effectKey))
+      {
+         return (new EmailApiEffectResult(EmailApiEffectOutcome.REFUSED, null));
+      }
+      request.withIdempotencyKey(effectKey);
+      var result = EmailEffects.send(EmailApiMapper.request(request), effectKey);
+      EmailApiMessage message = result.message() == null ? null : getMessage(result.message().id())
+         .orElseThrow(() -> new QException("Queued email reference is unavailable"));
+      return (new EmailApiEffectResult(EmailApiEffectOutcome.valueOf(result.outcome().name()), message));
+   }
+
+
+
+   /*******************************************************************************
     ** Create a validated template and active version once. Returns false when
     ** it already exists. Invalid definitions throw IllegalArgumentException.
     ** Does not grant PHI approval or overwrite administrator edits.
@@ -116,6 +141,43 @@ public final class EmailApi
          return (Optional.empty());
       }
       List<QRecord> rows = read(EmailTables.MESSAGE, EmailStore.equal("id", messageId).withLimit(1), MESSAGE_FIELDS);
+      return (rows.isEmpty() ? Optional.empty() : Optional.of(message(rows.getFirst())));
+   }
+
+
+
+   /*******************************************************************************
+    ** System lookup by exact effect or application key. Null, blank and unknown
+    ** keys return empty. Returns current metadata without message content.
+    *******************************************************************************/
+   public static Optional<EmailApiMessage> getMessageByIdempotencyKey(String key) throws QException
+   {
+      return (findMessage("idempotencyKey", key));
+   }
+
+
+
+   /*******************************************************************************
+    ** System lookup by the exact bracketed RFC Message-ID stored at enqueue time.
+    ** Null, blank and unknown ids return empty; provider response ids are distinct.
+    *******************************************************************************/
+   public static Optional<EmailApiMessage> getMessageByRfcMessageId(String rfcMessageId) throws QException
+   {
+      return (findMessage("rfcMessageId", rfcMessageId));
+   }
+
+
+
+   /*******************************************************************************
+    ** Share exact-key lookup semantics and the metadata-only projection.
+    *******************************************************************************/
+   private static Optional<EmailApiMessage> findMessage(String field, String value) throws QException
+   {
+      if(value == null || value.isBlank())
+      {
+         return (Optional.empty());
+      }
+      List<QRecord> rows = read(EmailTables.MESSAGE, EmailStore.equal(field, value).withLimit(1), MESSAGE_FIELDS);
       return (rows.isEmpty() ? Optional.empty() : Optional.of(message(rows.getFirst())));
    }
 
@@ -352,7 +414,7 @@ public final class EmailApi
       }
       String category = row.getValueString("category");
       return (new EmailApiMessage(row.getValueInteger("id"), row.getValueString("status"), category == null ? null : EmailApiCategory.valueOf(category),
-         row.getValueString("idempotencyKey"), row.getValueString("providerMessageId"), templateName, row.getValueString("linkedTableName"),
+         row.getValueString("idempotencyKey"), row.getValueString("rfcMessageId"), row.getValueString("providerMessageId"), templateName, row.getValueString("linkedTableName"),
          row.getValueString("linkedRecordId"), row.getValueInstant("createDate"), row.getValueInstant("sentDate"), row.getValueInstant("deliveredDate")));
    }
 }

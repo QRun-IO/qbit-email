@@ -22,8 +22,10 @@ package com.kingsrook.qbits.email.outbox;
 
 
 /*******************************************************************************
+ ** Internal; use EmailApi.
  ** Durable handoff outcomes. Operational failures propagate to the caller.
  *******************************************************************************/
+@Deprecated(forRemoval = false)
 public enum EmailEffectOutcome
 {
    QUEUED_OR_DUPLICATE,

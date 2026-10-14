@@ -32,16 +32,20 @@ import com.kingsrook.qbits.email.EmailRuntime;
 import com.kingsrook.qbits.email.H2Support;
 import com.kingsrook.qbits.email.metadata.EmailTables;
 import com.kingsrook.qbits.email.outbox.EmailCategory;
+import com.kingsrook.qbits.email.outbox.EmailEffects;
 import com.kingsrook.qbits.email.outbox.EmailRequest;
 import com.kingsrook.qbits.email.outbox.EmailSendResult;
 import com.kingsrook.qbits.email.support.EmailApiMapper;
 import com.kingsrook.qbits.email.support.SystemWrites;
+import com.kingsrook.qqq.backend.core.actions.QBackendTransaction;
 import com.kingsrook.qqq.backend.core.actions.messaging.SendMessageAction;
 import com.kingsrook.qqq.backend.core.context.QContext;
+import com.kingsrook.qqq.backend.core.exceptions.QException;
 import com.kingsrook.qqq.backend.core.model.actions.messaging.Content;
 import com.kingsrook.qqq.backend.core.model.actions.messaging.Party;
 import com.kingsrook.qqq.backend.core.model.actions.messaging.SendMessageInput;
 import com.kingsrook.qqq.backend.core.model.actions.messaging.email.EmailContentRole;
+import com.kingsrook.qqq.backend.core.model.actions.tables.insert.InsertInput;
 import com.kingsrook.qqq.backend.core.model.data.QRecord;
 import com.kingsrook.qqq.backend.core.model.metadata.QInstance;
 import org.junit.jupiter.api.AfterEach;
@@ -101,7 +105,8 @@ class EmailApiTest
          .withRecordVariable("order", "orders", 42).withCategory(EmailApiCategory.SECURITY)
          .withProviderName("named").withBrandName("brand").withLocale("fr").withIdempotencyKey("api:42")
          .withLinkedTableName("old").withLinkedRecordId("old").withLinkedRecord("orders", 42)
-         .withSenderQbit("old").withSenderProcess("old").withSender("orders", "complete").withSendAfter(after);
+         .withSenderQbit("old").withSenderProcess("old").withSender("orders", "complete").withSendAfter(after)
+         .withTransaction(new QBackendTransaction(), "rdbms");
       EmailRequest mapped = EmailApiMapper.request(request);
       for(Method getter : EmailApiRequest.class.getDeclaredMethods())
       {
@@ -180,6 +185,154 @@ class EmailApiTest
       assertThat(EmailApi.send(request("denied")).reasons()).contains("Sending email needs email.send");
       assertThat(EmailApi.getMessage(queued.messageId())).isPresent();
       assertThat(EmailApi.findMessagesByIdempotencyKeyPrefix("same", 1)).hasSize(1);
+   }
+
+
+
+   /*******************************************************************************
+    ** Durable handoffs and internal replays agree on the committed row and header.
+    *******************************************************************************/
+   @Test
+   void sendsOnceAndReconcilesCurrentMetadata() throws Exception
+   {
+      String key = "job:2:row:email_%";
+      EmailApiRequest request = request(null).withLinkedRecord("orders", 42);
+      EmailApiEffectResult first = EmailApi.sendOnce(request, key);
+      assertThat(request.getIdempotencyKey()).isEqualTo(key);
+      assertThat(first.outcome()).isEqualTo(EmailApiEffectOutcome.QUEUED_OR_DUPLICATE);
+      assertThat(first.message().status()).isEqualTo("QUEUED");
+      assertThat(first.message().idempotencyKey()).isEqualTo(key);
+      assertThat(first.message().rfcMessageId()).matches("<[0-9a-f]{32}@example\\.com>");
+      assertThat(EmailApi.sendOnce(request(key), key)).isEqualTo(first);
+      var internal = EmailEffects.send(EmailApiMapper.request(request(null)), key);
+      assertThat(internal.outcome().name()).isEqualTo(first.outcome().name());
+      assertThat(internal.message().id()).isEqualTo(first.message().id());
+      assertThat(internal.message().rfcMessageId()).isEqualTo(first.message().rfcMessageId());
+      assertThat(H2Support.all(EmailTables.MESSAGE)).hasSize(1);
+      assertThat(EmailApi.getMessage(first.message().id())).contains(first.message());
+      assertThat(EmailApi.findMessagesByIdempotencyKeyPrefix("job:", 5)).containsExactly(first.message());
+      SystemWrites.updateOne(EmailTables.MESSAGE, new QRecord().withValue("id", first.message().id())
+         .withValue("status", "SENT").withValue("providerMessageId", "provider-reference"));
+      instance.setEnforcePermissionsInCoreActions(true);
+      QContext.getQSession().setPermissions(Set.of());
+      EmailApiMessage found = EmailApi.getMessageByIdempotencyKey(key).orElseThrow();
+      assertThat(found.id()).isEqualTo(first.message().id());
+      assertThat(found.status()).isEqualTo("SENT");
+      assertThat(found.providerMessageId()).isEqualTo("provider-reference");
+      assertThat(found.rfcMessageId()).isEqualTo(first.message().rfcMessageId());
+      assertThat(found.linkedRecordId()).isEqualTo("42");
+      assertThat(EmailApi.getMessageByRfcMessageId(found.rfcMessageId())).contains(found);
+      for(String missing : new String[] {null, "", " ", "missing", "job:", "job:2:row:email_", "provider-reference"})
+      {
+         assertThat(EmailApi.getMessageByIdempotencyKey(missing)).isEmpty();
+         assertThat(EmailApi.getMessageByRfcMessageId(missing)).isEmpty();
+      }
+      assertThat(EmailApi.getMessageByRfcMessageId(found.rfcMessageId().replace("<", "").replace(">", ""))).isEmpty();
+   }
+
+
+
+   /*******************************************************************************
+    ** Invalid handoffs preserve caller keys and never create an outbox row.
+    *******************************************************************************/
+   @Test
+   void sendOnceRefusesInvalidRequestsAndKeys() throws Exception
+   {
+      for(String key : new String[] {null, "", " ", "a".repeat(501)})
+      {
+         EmailApiRequest request = request(null);
+         assertThat(EmailApi.sendOnce(request, key)).isEqualTo(new EmailApiEffectResult(EmailApiEffectOutcome.REFUSED, null));
+         assertThat(request.getIdempotencyKey()).isNull();
+         assertThat(EmailEffects.send(EmailApiMapper.request(request), key).outcome().name()).isEqualTo("REFUSED");
+      }
+      EmailApiRequest conflict = request("other");
+      assertThat(EmailApi.sendOnce(conflict, "effect").outcome()).isEqualTo(EmailApiEffectOutcome.REFUSED);
+      assertThat(conflict.getIdempotencyKey()).isEqualTo("other");
+      assertThat(EmailApi.sendOnce(null, "effect")).isEqualTo(new EmailApiEffectResult(EmailApiEffectOutcome.REFUSED, null));
+      assertThat(EmailApi.sendOnce(request(null).withSubject(null), "invalid"))
+         .isEqualTo(new EmailApiEffectResult(EmailApiEffectOutcome.REFUSED, null));
+      assertThat(H2Support.all(EmailTables.MESSAGE)).isEmpty();
+      assertThat(EmailApi.sendOnce(request(null), "a".repeat(500)).outcome()).isEqualTo(EmailApiEffectOutcome.QUEUED_OR_DUPLICATE);
+      instance.setEnforcePermissionsInCoreActions(true);
+      QContext.getQSession().setPermissions(Set.of());
+      assertThat(EmailApi.sendOnce(request(null), "denied")).isEqualTo(new EmailApiEffectResult(EmailApiEffectOutcome.REFUSED, null));
+      assertThat(H2Support.all(EmailTables.MESSAGE)).hasSize(1);
+   }
+
+
+
+   /*******************************************************************************
+    ** Replaying a suppressed audit row remains refused with the same identity.
+    *******************************************************************************/
+   @Test
+   void sendOnceRefusesSuppressedDuplicates() throws Exception
+   {
+      SystemWrites.insertOne(EmailTables.SUPPRESSION, new QRecord().withValue("address", "pat@example.com")
+         .withValue("reason", "HARD_BOUNCE").withValue("scope", "ALL"));
+      EmailApiEffectResult first = EmailApi.sendOnce(request(null), "suppressed");
+      assertThat(first.outcome()).isEqualTo(EmailApiEffectOutcome.REFUSED);
+      assertThat(first.message().status()).isEqualTo("SUPPRESSED");
+      assertThat(first.message().rfcMessageId()).isNotBlank();
+      assertThat(EmailApi.sendOnce(request(null), "suppressed")).isEqualTo(first);
+      var internal = EmailEffects.send(EmailApiMapper.request(request(null)), "suppressed");
+      assertThat(internal.outcome().name()).isEqualTo(first.outcome().name());
+      assertThat(internal.message().id()).isEqualTo(first.message().id());
+      assertThat(internal.message().rfcMessageId()).isEqualTo(first.message().rfcMessageId());
+      assertThat(EmailApi.getMessageByIdempotencyKey("suppressed")).contains(first.message());
+      assertThat(EmailApi.getMessageByRfcMessageId(first.message().rfcMessageId())).contains(first.message());
+      assertThat(H2Support.all(EmailTables.MESSAGE)).hasSize(1);
+   }
+
+
+
+   /*******************************************************************************
+    ** Neither a shared-backend transaction nor a deferred callback is a handoff.
+    *******************************************************************************/
+   @Test
+   void sendOnceRefusesCallerTransactions() throws Exception
+   {
+      try(QBackendTransaction transaction = QBackendTransaction.openFor(new InsertInput(EmailTables.MESSAGE)))
+      {
+         for(String backend : new String[] {null, "rdbms", "other"})
+         {
+            EmailApiRequest request = request(null).withTransaction(transaction, backend);
+            assertThat(EmailApi.sendOnce(request, "transaction")).isEqualTo(new EmailApiEffectResult(EmailApiEffectOutcome.REFUSED, null));
+            assertThat(request.getIdempotencyKey()).isNull();
+         }
+         transaction.commit();
+      }
+      assertThat(H2Support.all(EmailTables.MESSAGE)).isEmpty();
+   }
+
+
+
+   /*******************************************************************************
+    ** Ordinary sends retain caller transaction behavior through the public mapper.
+    *******************************************************************************/
+   @Test
+   void ordinarySendCanRollBackWithCaller() throws Exception
+   {
+      try(QBackendTransaction transaction = QBackendTransaction.openFor(new InsertInput(EmailTables.MESSAGE)))
+      {
+         assertThat(EmailApi.send(request("rollback").withTransaction(transaction, "rdbms")).status()).isEqualTo(EmailApiStatus.QUEUED);
+         transaction.rollback();
+      }
+      assertThat(EmailApi.getMessageByIdempotencyKey("rollback")).isEmpty();
+   }
+
+
+
+   /*******************************************************************************
+    ** Uncertain storage failures propagate so dispatchers can retry or reconcile.
+    *******************************************************************************/
+   @Test
+   void sendOncePropagatesStorageFailure() throws Exception
+   {
+      EmailApiEffectResult first = EmailApi.sendOnce(request(null), "collision");
+      SystemWrites.updateOne(EmailTables.MESSAGE, new QRecord().withValue("id", first.message().id()).withValue("idempotencyKey", "changed"));
+      assertThatThrownBy(() -> EmailApi.sendOnce(request(null), "collision")).isInstanceOf(QException.class);
+      assertThat(EmailApi.getMessageByIdempotencyKey("collision")).isEmpty();
+      assertThat(H2Support.all(EmailTables.MESSAGE)).hasSize(1);
    }
 
 
@@ -266,6 +419,7 @@ class EmailApiTest
       assertThat(message.status()).isEqualTo("DELIVERED");
       assertThat(message.category()).isEqualTo(EmailApiCategory.TRANSACTIONAL);
       assertThat(message.idempotencyKey()).isEqualTo("orders:1");
+      assertThat(message.rfcMessageId()).matches("<[0-9a-f]{32}@example\\.com>");
       assertThat(message.providerMessageId()).isEqualTo("provider-42");
       assertThat(message.templateName()).isEqualTo("notice");
       assertThat(message.linkedTableName()).isEqualTo("orders");
@@ -292,7 +446,7 @@ class EmailApiTest
       assertThatThrownBy(() -> EmailApi.findMessagesByIdempotencyKeyPrefix("orders", 0)).isInstanceOf(IllegalArgumentException.class);
       assertThatThrownBy(() -> EmailApi.findMessagesByIdempotencyKeyPrefix("orders", -1)).isInstanceOf(IllegalArgumentException.class);
       assertThat(List.of(EmailApiMessage.class.getRecordComponents())).extracting(component -> component.getName())
-         .containsExactly("id", "status", "category", "idempotencyKey", "providerMessageId", "templateName", "linkedTableName", "linkedRecordId", "createDate", "sentDate", "deliveredDate");
+         .containsExactly("id", "status", "category", "idempotencyKey", "rfcMessageId", "providerMessageId", "templateName", "linkedTableName", "linkedRecordId", "createDate", "sentDate", "deliveredDate");
    }
 
 

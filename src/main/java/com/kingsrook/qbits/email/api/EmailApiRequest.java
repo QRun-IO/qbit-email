@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import com.kingsrook.qqq.backend.core.actions.QBackendTransaction;
 
 
 /*******************************************************************************
@@ -52,6 +53,8 @@ public final class EmailApiRequest
    private String locale = "en";
    private EmailApiCategory category;
    private String idempotencyKey;
+   private QBackendTransaction transaction;
+   private String transactionBackendName;
    private Instant sendAfter;
    private String linkedTableName;
    private String linkedRecordId;
@@ -393,6 +396,40 @@ public final class EmailApiRequest
    public EmailApiRequest withIdempotencyKey(String idempotencyKey)
    {
       this.idempotencyKey = idempotencyKey;
+      return (this);
+   }
+
+
+
+   /*******************************************************************************
+    ** Getter for the optional caller transaction. sendOnce refuses this option.
+    *******************************************************************************/
+   public QBackendTransaction getTransaction()
+   {
+      return (transaction);
+   }
+
+
+
+   /*******************************************************************************
+    ** Getter for the declared backend of the caller transaction.
+    *******************************************************************************/
+   public String getTransactionBackendName()
+   {
+      return (transactionBackendName);
+   }
+
+
+
+   /*******************************************************************************
+    ** Join a caller transaction for ordinary send; another backend defers enqueue
+    ** until commit. Declare its backend because QBackendTransaction does not expose
+    ** it. sendOnce refuses any caller transaction to guarantee committed handoff.
+    *******************************************************************************/
+   public EmailApiRequest withTransaction(QBackendTransaction transaction, String backendName)
+   {
+      this.transaction = transaction;
+      this.transactionBackendName = backendName;
       return (this);
    }
 

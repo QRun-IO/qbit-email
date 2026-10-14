@@ -101,7 +101,7 @@ template may set `edit_permission_name` to restrict who edits it (e.g. marketing
 
 ### 2.5 Public API
 
-`com.kingsrook.qbits.email.api` is the stable Java contract for consuming qbits.
+`com.kingsrook.qbits.email.api.EmailApi` is the sole public qbit-email surface for consuming qbits.
 Changes within a `0.x` minor release line are additive only. Public/protected
 signatures contain only JDK, QQQ core or API-package types; internal packages are
 not API and may change. A reflection test discovers every compiled API class and
@@ -111,13 +111,26 @@ checks signatures, including generic arguments, bounds and nested types.
   permissions, schema/PHI validation, suppression and one-recipient rules. Requests
   cover recipients/sender selection, body alternatives, template variables and record
   provenance, category/provider/brand/locale, idempotency, linked records, producer
-  identity and scheduling. Results expose message id, enqueue status and reasons.
+  identity, scheduling and caller transactions (`withTransaction(transaction, backendName)`).
+  Results expose message id, enqueue status and reasons.
+- `sendOnce(EmailApiRequest, effectKey)` provides durable handoff through the existing
+  internal effects implementation. The key becomes the request's idempotency key;
+  null requests, missing/blank/over-500-character keys, mismatches and caller transactions
+  are refused. `EmailApiEffectResult` carries `EmailApiEffectOutcome.QUEUED_OR_DUPLICATE`
+  or `REFUSED` and nullable `EmailApiMessage`. Success means committed outbox storage,
+  and replays retain the row and RFC Message-ID. Suppressed audit rows remain refused
+  on replay and return metadata; refusals without a row return null. Operational
+  failures throw `QException`. The deprecated `EmailEffects`, `EmailEffectOutcome` and
+  `EmailMessageRef` remain internal; consumers use this API. See [durable jobs](DURABLE-JOBS.md).
 - `ensureTemplate(EmailApiTemplate)` delegates create-once template registration;
   `EmailApiVariable` carries the variable contract. Existing content is never
   overwritten, and the API does not confer PHI approval.
-- `getMessage` and bounded, literal `findMessagesByIdempotencyKeyPrefix` perform
+- `getMessage`, exact `getMessageByIdempotencyKey`/`getMessageByRfcMessageId` and
+  bounded, literal `findMessagesByIdempotencyKeyPrefix` perform
   system reads of an explicit metadata projection: id/status/category, idempotency
-  and provider ids, template name, linked record and create/sent/delivered dates.
+  key, RFC Message-ID and provider id, template name, linked record and create/sent/delivered dates.
+  Exact-key lookups return empty for null/blank/missing values. RFC lookup requires
+  the exact bracketed header stored at enqueue time, distinct from provider response ids.
   No recipients, subjects, bodies or snapshots are fetched or returned by lookups.
   Callers own authorization before presenting metadata to users.
 - `isInstalled`, `defaultProviderName`, `listSenderAddresses` and `readiness` replace
