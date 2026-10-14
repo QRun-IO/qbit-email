@@ -204,7 +204,9 @@ error) and `email_event` (section 6).
   content), Cancel (queued or waiting), Send Now (waiting). Standard streamed-ETL Review and Result
   screens.
 - **Retention:** a daily job clears bodies after `bodyRetentionDays` and deletes final messages
-  older than `messageRetentionDays` (0 = keep forever; kof22 keeps).
+  older than `messageRetentionDays` (0 = keep forever; kof22 keeps). NOTIFICATION and MARKETING
+  messages are never deleted, because their unsubscribe links resolve through the message row
+  (8.2); at `messageRetentionDays` retention only clears their bodies and variable snapshot.
 
 ## 5. Templates and branding
 
@@ -313,6 +315,13 @@ content), url (clicks only). Opens and clicks are stored only when the provider 
 ### 6.3 Phase (c) implementation
 - Inbox states: PENDING, PROCESSED, FAILED, IGNORED. Retry after configured backoff,
   FAILED after six attempts, and a standard Reprocess action resets FAILED to PENDING.
+- Events in one payload are applied independently. Only unmatched events (or events whose
+  message is still SENDING) defer the row; on the sixth attempt they are skipped and the row is
+  PROCESSED with the note "N events did not match a message". Suppression applies only to a
+  recipient in the matched message's to, cc or bcc; an SES bounce or complaint without its
+  recipient list is skipped, never widened to all destinations. SNS notifications must carry a
+  Timestamp no older than 1 hour and no more than 5 minutes ahead, and certificate fetch
+  failures are cached for 5 minutes per URL.
 - A short DB transaction locks the common provider gate then the actual provider;
   it rechecks the observed inbox attempt and commits all changes together. No worker
   filesystem, extra claim table, in-process scheduler or network operation is needed

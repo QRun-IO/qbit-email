@@ -94,6 +94,7 @@ class EmailInboxProcessorTest
    {
       QRecord provider = provider(kind);
       QRecord message = message(provider);
+      SystemWrites.updateOne(EmailTables.MESSAGE, new QRecord().withValue("id", message.getValue("id")).withValue("toAddresses", "recipient@example.com, second@example.com"));
       receive(provider, "fixture", resource("/webhooks/" + fixture));
       assertThat(new EmailInboxProcessor().runOnce()).isEqualTo(1);
       assertThat(H2Support.all(EmailTables.EVENT)).hasSize(count);
@@ -214,9 +215,7 @@ class EmailInboxProcessorTest
    {
       QRecord provider = provider("SENDGRID");
       QRecord message = message(provider);
-      JSONArray batch = new JSONArray(resource("/webhooks/sendgrid-batch.json"));
-      batch.getJSONObject(1).put("sg_message_id", "missing-provider-message");
-      receive(provider, "retry", batch.toString());
+      receive(provider, "retry", "[{not json");
       for(int i = 1; i <= 6; i++)
       {
          assertThat(new EmailInboxProcessor().runOnce()).isZero();
@@ -242,6 +241,74 @@ class EmailInboxProcessorTest
       SystemWrites.updateOne(EmailTables.INBOX, new QRecord().withValue("id", failed.getValue("id")).withValue("payloadJson", resource("/webhooks/sendgrid-batch.json")));
       new EmailProcesses.ScheduledStep().run(new RunBackendStepInput().withProcessName(EmailProcesses.PROCESS_WEBHOOKS), new RunBackendStepOutput());
       assertThat(H2Support.all(EmailTables.EVENT)).hasSize(2);
+   }
+
+   /*******************************************************************************
+    ** A foreign event never blocks a real hard bounce in the same SendGrid batch; the
+    ** foreign one retries, then the row finishes PROCESSED with a note, not FAILED.
+    *******************************************************************************/
+   @Test
+   void unmatchedEventDoesNotBlockMatchedBounce() throws Exception
+   {
+      QRecord provider = provider("SENDGRID");
+      QRecord message = message(provider);
+      JSONArray batch = new JSONArray(resource("/webhooks/sendgrid-batch.json"));
+      batch.put(new JSONObject().put("email", "stranger@example.com").put("timestamp", NOW.getEpochSecond()).put("event", "bounce")
+         .put("type", "bounce").put("sg_event_id", "foreign").put("sg_message_id", "someone-elses-message.filter009"));
+      receive(provider, "mixed", batch.toString());
+      for(int i = 1; i <= 6; i++)
+      {
+         assertThat(new EmailInboxProcessor().runOnce()).isEqualTo(1);
+         QRecord row = H2Support.all(EmailTables.INBOX).getFirst();
+         assertThat(row.getValueInteger("attempts")).isEqualTo(i);
+         assertThat(H2Support.all(EmailTables.EVENT)).hasSize(2);
+         assertThat(H2Support.all(EmailTables.SUPPRESSION)).hasSize(1);
+         assertThat(EmailStore.get(EmailTables.MESSAGE, message.getValueInteger("id"), null).getValueString("status")).isEqualTo("BOUNCED");
+         if(i < 6)
+         {
+            assertThat(row.getValueString("status")).isEqualTo("PENDING");
+            assertThat(row.getValueString("lastError")).isEqualTo("1 event did not match a message");
+            EmailRuntime.setClock(Clock.fixed(row.getValueInstant("nextAttemptDate"), ZoneOffset.UTC));
+         }
+      }
+      QRecord done = H2Support.all(EmailTables.INBOX).getFirst();
+      assertThat(done.getValueString("status")).isEqualTo("PROCESSED");
+      assertThat(done.getValueString("lastError")).isEqualTo("1 event did not match a message");
+      assertThat(done.getValueInstant("processedDate")).isNotNull();
+      assertThat(done.getValue("nextAttemptDate")).isNull();
+   }
+
+   /*******************************************************************************
+    ** Only a recipient of the matched message can be suppressed, and an SES bounce
+    ** without bouncedRecipients is skipped rather than widened to all destinations.
+    *******************************************************************************/
+   @Test
+   void suppressionOnlyForRecipientsOfTheMessage() throws Exception
+   {
+      QRecord provider = provider("SENDGRID");
+      QRecord message = message(provider);
+      JSONObject event = new JSONObject().put("event", "bounce").put("type", "bounce").put("email", "intruder@example.com")
+         .put("qqq_email_id", message.getValueString("id")).put("timestamp", NOW.getEpochSecond()).put("sg_event_id", "intruder");
+      receive(provider, "intruder", new JSONArray().put(event).toString());
+      assertThat(new EmailInboxProcessor().runOnce()).isEqualTo(1);
+      assertThat(H2Support.all(EmailTables.EVENT)).isEmpty();
+      assertThat(H2Support.all(EmailTables.SUPPRESSION)).isEmpty();
+      QRecord row = H2Support.all(EmailTables.INBOX).getFirst();
+      assertThat(row.getValueString("status")).isEqualTo("IGNORED");
+      assertThat(row.getValueString("lastError")).contains("1 event was skipped");
+      assertThat(row.getValueString("lastError")).doesNotContain("intruder");
+
+      QRecord ses = provider("SES");
+      QRecord sesMessage = message(ses);
+      JSONObject envelope = new JSONObject(resource("/webhooks/ses-bounce.json"));
+      JSONObject body = new JSONObject(envelope.getString("Message"));
+      body.getJSONObject("mail").getJSONArray("headers").getJSONObject(0).put("value", sesMessage.getValueString("id"));
+      body.getJSONObject("bounce").remove("bouncedRecipients");
+      receive(ses, "no-recipients", envelope.put("Message", body.toString()).toString());
+      assertThat(new EmailInboxProcessor().runOnce()).isEqualTo(1);
+      assertThat(H2Support.all(EmailTables.EVENT)).isEmpty();
+      assertThat(H2Support.all(EmailTables.SUPPRESSION)).isEmpty();
+      assertThat(EmailStore.get(EmailTables.MESSAGE, sesMessage.getValueInteger("id"), null).getValueString("status")).isEqualTo("SENT");
    }
 
    /*******************************************************************************

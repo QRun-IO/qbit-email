@@ -243,6 +243,35 @@ sanitizer removes iframes and style blocks, so this preview is not an exact mail
 emulator. Draft MJML is compiled in memory for preview when a compiler is configured;
 preview never stores the result or changes the version.
 
+### Templates from another qbit
+
+A qbit that sends its own mail ships the template with its code instead of asking an
+administrator to create it. Describe it with `EmailTemplateDefinition` and call
+`EmailTemplates.ensure` at startup or before first use:
+
+```java
+boolean created = EmailTemplates.ensure(new EmailTemplateDefinition()
+   .withName("order_ready")
+   .withLabel("Order ready")
+   .withCategory(EmailCategory.TRANSACTIONAL)
+   .withSubject("Order {{order_number}} is ready")
+   .withBody("Hi {{customer_name}}, order {{order_number}} is ready for pickup.")
+   .withVariable("order_number", "Order number", "STRING", true, "PUBLIC")
+   .withVariable("customer_name", "Customer name", "STRING", true, null)
+   .withSampleVariables("{\"order_number\":\"A-1\",\"customer_name\":\"Pat\"}")
+   .withOwnerQbit("orders")
+   .withEditPermissionName("orders.edit"));
+```
+
+`kind` defaults to MARKDOWN (MJML and HTML are also accepted), `withTextBody` is
+optional, and `withVariablesSchema(json)` replaces `withVariable` when you already have
+the JSON. When no template of that name exists, `ensure` validates the definition like
+Activate Version (syntax, schema, a render with the samples, MJML compile), creates the
+template and an ACTIVE version 1 as the qbit, and returns true. When one exists it does
+nothing and returns false, so people's edits and later versions are never overwritten;
+the unique name settles concurrent callers. An invalid definition throws
+`IllegalArgumentException` with plain reasons and writes nothing.
+
 ## PHI and PII
 
 `withRecordVariable` reads through `QueryAction` in the sender's QContext; it does not
@@ -351,9 +380,16 @@ SendGrid ECDSA and Mailgun HMAC with durable nonce replay protection.
 
 The 1 MiB receiver persists before acknowledging. DB transactions serialize
 processing across replicas and commit event rows, message state and suppression
-atomically. Retries use configured backoff and fail after six attempts; **Reprocess**
-on FAILED inbox rows uses the standard Review/Result flow. Unmatched messages retry;
-unknown events and disabled tracking are ignored. Per-event recipient keys deduplicate
+atomically. Events in a payload are applied independently: matched events commit at
+once, and only unmatched events (or events whose message is still SENDING) retry the
+row with configured backoff. After six attempts they are skipped and the row finishes
+PROCESSED with a note ("N events did not match a message"). Rows that cannot be parsed
+or written fail after six attempts; **Reprocess** on FAILED inbox rows uses the
+standard Review/Result flow. An event whose recipient is not on the matched message
+is ignored, and an SES bounce or complaint without its recipient list is skipped.
+SNS notifications older than an hour or more than five minutes ahead are refused, and
+certificate fetch failures are cached for five minutes per URL. Disabled tracking is
+ignored. Per-event recipient keys deduplicate
 overlapping batches. All new service state is in the DB; certificate caches are in
 memory. No runtime filesystem or new dependencies are used.
 

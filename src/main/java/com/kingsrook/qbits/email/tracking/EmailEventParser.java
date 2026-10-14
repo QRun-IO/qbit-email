@@ -69,7 +69,7 @@ public final class EmailEventParser
    }
 
    /*******************************************************************************
-    ** SES recipients live under the specific event, with mail.destination fallback.
+    ** SES recipients live under the specific event, with mail.destination fallback for non-suppressive events only.
     *******************************************************************************/
    private static void ses(JSONObject envelope, Instant received, List<Event> events)
    {
@@ -123,6 +123,13 @@ public final class EmailEventParser
          case "DEFERRED" -> "delayedRecipients";
          default -> "recipients";
       });
+      if(recipients == null && ("BOUNCED".equals(type) || "COMPLAINED".equals(type)))
+      {
+         // Never widen a bounce or complaint to every destination; the event carries no recipient and is skipped.
+         events.add(new Event(envelope.getString("MessageId"), messageId, mail.getString("messageId"), type, bounce, null,
+            time(data.opt("timestamp"), received), null, null));
+         return;
+      }
       if(recipients == null)
       {
          recipients = mail.getJSONArray("destination");

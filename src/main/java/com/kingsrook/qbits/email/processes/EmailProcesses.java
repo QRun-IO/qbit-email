@@ -449,6 +449,8 @@ public final class EmailProcesses
 
    /*******************************************************************************
     ** Clear retained bodies and optionally delete final messages and their attempts.
+    ** NOTIFICATION and MARKETING messages are never deleted (their unsubscribe links must
+    ** keep working); at message retention only their bodies and variable snapshot are cleared.
     *******************************************************************************/
    public static void retain() throws QException
    {
@@ -473,7 +475,9 @@ public final class EmailProcesses
          {
             continue;
          }
-         if(config.getMessageRetentionDays() > 0 && finalDate.isBefore(now.minus(Duration.ofDays(config.getMessageRetentionDays()))))
+         boolean expired = config.getMessageRetentionDays() > 0 && finalDate.isBefore(now.minus(Duration.ofDays(config.getMessageRetentionDays())));
+         boolean optOut = List.of("NOTIFICATION", "MARKETING").contains(row.getValueString("category"));
+         if(expired && !optOut)
          {
             try(QBackendTransaction transaction = QBackendTransaction.openFor(new UpdateInput(EmailTables.MESSAGE)))
             {
@@ -487,9 +491,19 @@ public final class EmailProcesses
                transaction.commit();
             }
          }
-         else if(finalDate.isBefore(now.minus(Duration.ofDays(config.getBodyRetentionDays()))) && (row.getValue("htmlBody") != null || row.getValue("textBody") != null))
+         else if(expired || finalDate.isBefore(now.minus(Duration.ofDays(config.getBodyRetentionDays()))))
          {
-            SystemWrites.updateOne(EmailTables.MESSAGE, new QRecord().withValue("id", row.getValue("id")).withValue("htmlBody", null).withValue("textBody", null));
+            // Notification and marketing rows are never deleted, so their unsubscribe links keep working; only content goes.
+            boolean clearSnapshot = expired && row.getValue("variablesSnapshot") != null;
+            if(row.getValue("htmlBody") != null || row.getValue("textBody") != null || clearSnapshot)
+            {
+               QRecord update = new QRecord().withValue("id", row.getValue("id")).withValue("htmlBody", null).withValue("textBody", null);
+               if(clearSnapshot)
+               {
+                  update.withValue("variablesSnapshot", null);
+               }
+               SystemWrites.updateOne(EmailTables.MESSAGE, update);
+            }
          }
       }
    }

@@ -41,12 +41,18 @@ import org.json.JSONObject;
 
 
 /*******************************************************************************
- ** SNS verification with HTTPS AWS-only certificate retrieval and memory caching.
+ ** SNS verification with HTTPS AWS-only certificate retrieval, memory caching (including
+ ** a five-minute cache of fetch failures) and a freshness window on the signed Timestamp.
  *******************************************************************************/
 public final class SnsVerifier
 {
    private final EmailHttp http;
+   private static final Duration MAX_AGE = Duration.ofHours(1);
+   private static final Duration MAX_FUTURE = Duration.ofMinutes(5);
+   private static final Duration FAILURE_TTL = Duration.ofMinutes(5);
+
    private final Map<String, X509Certificate> certificates = new ConcurrentHashMap<>();
+   private final Map<String, Instant> failures = new ConcurrentHashMap<>();
 
    /*******************************************************************************
     ** Default bounded HTTPS transport without redirects.
@@ -133,11 +139,34 @@ public final class SnsVerifier
          {
             return (false);
          }
+         Instant stamp = Instant.parse(payload.getString("Timestamp"));
+         if(stamp.isBefore(now.minus(MAX_AGE)) || stamp.isAfter(now.plus(MAX_FUTURE)))
+         {
+            return (false);
+         }
          String canonical = canonical(payload);
          X509Certificate certificate = certificates.get(url);
          if(certificate == null || certificate.getNotAfter().toInstant().isBefore(now))
          {
-            byte[] pem = get(url).getBytes(StandardCharsets.UTF_8);
+            Instant failed = failures.get(url);
+            if(failed != null && failed.plus(FAILURE_TTL).isAfter(now))
+            {
+               throw (new IOException("SNS verification service unavailable"));
+            }
+            byte[] pem;
+            try
+            {
+               pem = get(url).getBytes(StandardCharsets.UTF_8);
+            }
+            catch(IOException e)
+            {
+               if(failures.size() >= 64)
+               {
+                  failures.clear();
+               }
+               failures.put(url, now);
+               throw (e);
+            }
             certificate = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(new ByteArrayInputStream(pem));
             certificate.checkValidity(Date.from(now));
             if(certificates.size() >= 64)

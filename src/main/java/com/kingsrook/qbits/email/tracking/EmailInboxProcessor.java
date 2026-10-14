@@ -22,9 +22,12 @@ package com.kingsrook.qbits.email.tracking;
 
 
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import com.kingsrook.qbits.email.EmailRuntime;
 import com.kingsrook.qbits.email.delivery.EmailAlerts;
 import com.kingsrook.qbits.email.metadata.EmailTables;
@@ -32,10 +35,14 @@ import com.kingsrook.qbits.email.support.EmailStore;
 import com.kingsrook.qbits.email.support.SystemWrites;
 import com.kingsrook.qqq.backend.core.actions.QBackendTransaction;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
+import com.kingsrook.qqq.backend.core.logging.QLogger;
 import com.kingsrook.qqq.backend.core.model.actions.tables.query.QCriteriaOperator;
 import com.kingsrook.qqq.backend.core.model.actions.tables.query.QFilterOrderBy;
 import com.kingsrook.qqq.backend.core.model.actions.tables.update.UpdateInput;
 import com.kingsrook.qqq.backend.core.model.data.QRecord;
+import jakarta.mail.internet.InternetAddress;
+
+import static com.kingsrook.qqq.backend.core.logging.LogUtils.logPair;
 
 
 /*******************************************************************************
@@ -44,6 +51,10 @@ import com.kingsrook.qqq.backend.core.model.data.QRecord;
  *******************************************************************************/
 public final class EmailInboxProcessor
 {
+   private static final QLogger LOG = QLogger.getLogger(EmailInboxProcessor.class);
+
+   private static final int MAX_ATTEMPTS = 6;
+
    /*******************************************************************************
     ** Poll due rows; transaction rollback releases claims after a worker crash.
     *******************************************************************************/
@@ -87,6 +98,8 @@ public final class EmailInboxProcessor
             return (false);
          }
          int applied = 0;
+         int unmatched = 0;
+         int skipped = 0;
          for(EmailEventParser.Event event : new EmailEventParser().parse(row.getValueString("kind"), row.getValueString("payloadJson"), row.getValueInstant("receivedDate")))
          {
             if(("OPENED".equals(event.type()) && !Boolean.TRUE.equals(provider.getValueBoolean("trackOpens")))
@@ -97,14 +110,22 @@ public final class EmailInboxProcessor
             QRecord message = match(event, provider.getValueInteger("id"), tx);
             if(message == null || "SENDING".equals(message.getValueString("status")))
             {
-               throw (new QException("Email event is awaiting its message"));
+               unmatched++;
+               continue;
+            }
+            String recipient = normalize(event.recipient());
+            if(recipient == null || !recipients(message).contains(recipient))
+            {
+               LOG.info("Ignoring an email event whose recipient is not on the message", logPair("messageId", message.getValue("id")));
+               skipped++;
+               continue;
             }
             if(Boolean.TRUE.equals(message.getValueBoolean("phiApproved")) && List.of("OPENED", "CLICKED").contains(event.type()))
             {
                continue;
             }
             String key = provider.getValueInteger("id") + ":" + WebhookVerification.hash((event.externalId() + "\n" + event.type() + "\n"
-               + EmailTrackingStore.address(event.recipient())).getBytes(StandardCharsets.UTF_8));
+               + recipient).getBytes(StandardCharsets.UTF_8));
             QRecord stored = EmailTrackingStore.event(message, event, key, tx);
             if(stored == null)
             {
@@ -122,9 +143,23 @@ public final class EmailInboxProcessor
                EmailTrackingStore.suppress(message, stored, message.getValueString("category"), "UNSUBSCRIBE", tx);
             }
          }
+
+         int attempts = row.getValueInteger("attempts") + 1;
+         boolean retry = unmatched > 0 && attempts < MAX_ATTEMPTS;
+         List<String> notes = new ArrayList<>();
+         if(unmatched > 0)
+         {
+            notes.add(unmatched + (unmatched == 1 ? " event did not match a message" : " events did not match a message"));
+         }
+         if(skipped > 0)
+         {
+            notes.add(skipped + (skipped == 1 ? " event was skipped (recipient not on the message)" : " events were skipped (recipient not on the message)"));
+         }
          EmailStore.update(EmailTables.INBOX, new QRecord().withValue("id", row.getValue("id"))
-            .withValue("status", applied == 0 ? "IGNORED" : "PROCESSED").withValue("attempts", row.getValueInteger("attempts") + 1)
-            .withValue("processedDate", EmailRuntime.clock().instant()).withValue("nextAttemptDate", null).withValue("lastError", null), tx);
+            .withValue("status", retry ? "PENDING" : (applied == 0 && unmatched == 0 ? "IGNORED" : "PROCESSED")).withValue("attempts", attempts)
+            .withValue("processedDate", retry ? null : EmailRuntime.clock().instant())
+            .withValue("nextAttemptDate", retry ? EmailRuntime.clock().instant().plusSeconds(60L * EmailRuntime.config().retryMinutesAfterAttempt(attempts)) : null)
+            .withValue("lastError", notes.isEmpty() ? null : String.join("; ", notes)), tx);
          tx.commit();
       }
       catch(Exception e)
@@ -137,6 +172,54 @@ public final class EmailInboxProcessor
          complaintAlert();
       }
       return (true);
+   }
+
+   /*******************************************************************************
+    ** Canonical mailbox, or null when the provider supplied none that is valid.
+    *******************************************************************************/
+   private static String normalize(String value)
+   {
+      if(value == null || value.isBlank())
+      {
+         return (null);
+      }
+      try
+      {
+         return (EmailTrackingStore.address(value));
+      }
+      catch(IllegalArgumentException e)
+      {
+         return (null);
+      }
+   }
+
+   /*******************************************************************************
+    ** The canonical to, cc and bcc mailboxes of a message; only these may be
+    ** suppressed by an event matched to it.
+    *******************************************************************************/
+   private static Set<String> recipients(QRecord message)
+   {
+      Set<String> set = new HashSet<>();
+      for(String field : List.of("toAddresses", "ccAddresses", "bccAddresses"))
+      {
+         String value = message.getValueString(field);
+         if(value == null || value.isBlank())
+         {
+            continue;
+         }
+         try
+         {
+            for(InternetAddress address : InternetAddress.parse(value, false))
+            {
+               set.add(address.getAddress().toLowerCase(Locale.ROOT));
+            }
+         }
+         catch(jakarta.mail.internet.AddressException e)
+         {
+            // A malformed stored envelope contributes no recipients.
+         }
+      }
+      return (set);
    }
 
    /*******************************************************************************
@@ -195,8 +278,8 @@ public final class EmailInboxProcessor
          {
             int attempts = row.getValueInteger("attempts") + 1;
             EmailStore.update(EmailTables.INBOX, new QRecord().withValue("id", row.getValue("id")).withValue("attempts", attempts)
-               .withValue("status", attempts >= 6 ? "FAILED" : "PENDING").withValue("lastError", "Email event processing failed; check message matching and payload validity.")
-               .withValue("nextAttemptDate", attempts >= 6 ? null : EmailRuntime.clock().instant().plusSeconds(60L * EmailRuntime.config().retryMinutesAfterAttempt(attempts))), tx);
+               .withValue("status", attempts >= MAX_ATTEMPTS ? "FAILED" : "PENDING").withValue("lastError", "Email event processing failed; check message matching and payload validity.")
+               .withValue("nextAttemptDate", attempts >= MAX_ATTEMPTS ? null : EmailRuntime.clock().instant().plusSeconds(60L * EmailRuntime.config().retryMinutesAfterAttempt(attempts))), tx);
             tx.commit();
          }
       }

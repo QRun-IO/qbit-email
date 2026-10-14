@@ -132,6 +132,51 @@ class WebhookVerifiersTest
    }
 
    /*******************************************************************************
+    ** Notifications outside the one hour past / five minute future window are refused
+    ** before any certificate fetch.
+    *******************************************************************************/
+   @Test
+   void snsTimestampWindow() throws Exception
+   {
+      AtomicInteger requests = new AtomicInteger();
+      String pem = resource("/sns-test/test-only-certificate.pem");
+      var verifier = new SnsVerifier(request ->
+      {
+         requests.incrementAndGet();
+         return (response(request, 200, pem));
+      });
+      Instant now = certificateTime();
+      JSONObject base = new JSONObject(resource("/webhooks/ses-bounce.json"));
+      assertThat(verifier.verify(signSns(new JSONObject(base.toString()), now.minusSeconds(3601)), TOPIC, now)).isFalse();
+      assertThat(verifier.verify(signSns(new JSONObject(base.toString()), now.plusSeconds(301)), TOPIC, now)).isFalse();
+      assertThat(requests.get()).isZero();
+      assertThat(verifier.verify(signSns(new JSONObject(base.toString()), now.minusSeconds(3599)), TOPIC, now)).isTrue();
+      assertThat(verifier.verify(signSns(new JSONObject(base.toString()), now.plusSeconds(299)), TOPIC, now)).isTrue();
+      assertThat(verifier.verify(signSns(new JSONObject(base.toString())).put("Timestamp", "yesterday"), TOPIC, now)).isFalse();
+   }
+
+   /*******************************************************************************
+    ** A failed certificate fetch is remembered per URL for five minutes.
+    *******************************************************************************/
+   @Test
+   void snsCachesCertificateFetchFailures() throws Exception
+   {
+      AtomicInteger requests = new AtomicInteger();
+      var verifier = new SnsVerifier(request ->
+      {
+         requests.incrementAndGet();
+         return (response(request, 503, "down"));
+      });
+      Instant now = certificateTime();
+      JSONObject data = signSns(new JSONObject(resource("/webhooks/ses-bounce.json")));
+      assertThatThrownBy(() -> verifier.verify(data, TOPIC, now)).isInstanceOf(java.io.IOException.class);
+      assertThatThrownBy(() -> verifier.verify(data, TOPIC, now.plusSeconds(299))).isInstanceOf(java.io.IOException.class);
+      assertThat(requests.get()).isEqualTo(1);
+      assertThatThrownBy(() -> verifier.verify(signSns(new JSONObject(data.toString()), now.plusSeconds(300)), TOPIC, now.plusSeconds(300))).isInstanceOf(java.io.IOException.class);
+      assertThat(requests.get()).isEqualTo(2);
+   }
+
+   /*******************************************************************************
     ** Strict AWS URL host, scheme, path and authority before network access.
     *******************************************************************************/
    @ParameterizedTest

@@ -46,7 +46,13 @@ class EmailEventParserTest
       body.remove("eventType");
       body.put("notificationType", raw);
       String field = "DeliveryDelay".equals(raw) ? "deliveryDelay" : raw.toLowerCase();
-      body.put(field, new JSONObject().put("timestamp", NOW.toString()).put("link", "https://example.com/page").put("bounceType", "Transient"));
+      JSONObject data = new JSONObject().put("timestamp", NOW.toString()).put("link", "https://example.com/page").put("bounceType", "Transient");
+      if("Bounce".equals(raw) || "Complaint".equals(raw))
+      {
+         data.put("Bounce".equals(raw) ? "bouncedRecipients" : "complainedRecipients", new JSONArray()
+            .put(new JSONObject().put("emailAddress", "recipient@example.com")).put(new JSONObject().put("emailAddress", "second@example.com")));
+      }
+      body.put(field, data);
       envelope.put("Message", body.toString());
       var events = new EmailEventParser().parse("SES", envelope.toString(), NOW);
       assertThat(events).hasSize(2).allSatisfy(event ->

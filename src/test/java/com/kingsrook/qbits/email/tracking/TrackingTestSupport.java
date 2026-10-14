@@ -124,6 +124,15 @@ public final class TrackingTestSupport
     *******************************************************************************/
    public static JSONObject signSns(JSONObject payload) throws Exception
    {
+      return (signSns(payload, certificateTime()));
+   }
+
+   /*******************************************************************************
+    ** Sign with an explicit envelope Timestamp (the verifier enforces freshness).
+    *******************************************************************************/
+   public static JSONObject signSns(JSONObject payload, Instant timestamp) throws Exception
+   {
+      payload.put("Timestamp", timestamp.toString());
       String pem = resource("/sns-test/test-only-private-key.pem").replaceAll("-----[^-]+-----", "").replaceAll("\\s", "");
       PrivateKey key = KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(Base64.getDecoder().decode(pem)));
       List<String> fields = "Notification".equals(payload.getString("Type")) ? List.of("Message", "MessageId", "Subject", "Timestamp", "TopicArn", "Type")
