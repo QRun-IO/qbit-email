@@ -1,0 +1,63 @@
+bundle: qbit-email
+version: 1
+layer: QBIT
+# Help for the Email app and every email_* table, in the QQQ help-bundle format
+# (qqq#1198). Each table entry says what the table is for and how its rows get
+# created, so an empty table explains itself. EmailHelp applies it until the core
+# HelpBundles registry ships in a QQQ release (STAND-IN(core=#1198)).
+# Summaries stay under 120 characters (EmailTablesGuardrailTest).
+entries:
+  - key: app:email;slot:help
+    summary: "One email service: a durable outbox, providers, templates with branding, delivery tracking and suppression."
+    content: |
+      The Setup card on the home (email admins) lists every part of Email with its status and the next step. Nothing sends until an enabled default provider exists: that is your mail server or service, so the qbit cannot invent it. A new installation starts with a neutral brand to copy, and the secure-message template appears the first time the home opens.
+
+  - key: table:email_provider;slot:help
+    summary: "A way to send mail: SMTP, SES, SendGrid, Mailgun or Postmark, with limits and the names of its secret variables."
+    content: |
+      **How rows get created:** an administrator adds one with New: pick the kind, the host or region, a from address, and the NAMES of the environment variables that hold the credentials (the secrets themselves are never stored). Turn on Default so sends use it. Run Send Test Email on it to check the connection, then watch its health. This is your own connection, so it starts empty. Empty means nothing can be sent yet.
+
+  - key: table:email_provider_sender_address;slot:help
+    summary: "An address a provider may send from, with a display name. One can be the default for that provider."
+    content: |
+      **How rows get created:** add one from a provider's Sender Addresses list when the provider needs more than its single from address (several mailboxes or brands). A request may name one; otherwise the default is used. Empty is normal: the provider's own from address is used.
+
+  - key: table:email_message;slot:help
+    summary: "The outbox: every email the system queued, with its status, attempts, bounce and complaint dates."
+    content: |
+      **How rows get created:** never by hand. Every send, from any qbit or process, is queued here first (EmailApi.send, the Send Email process, or a messaging provider), then the dispatcher sends it, retries failures and records the result. Actions: Send Now, Resend and Cancel. Empty means nothing has been sent from this system yet.
+
+  - key: table:email_message_attempt;slot:help
+    summary: "One try to hand a message to a provider: outcome, timing and error. Read-only."
+    content: |
+      **How rows get created:** written by the dispatcher each time it tries to send a message. Used for provider rate limits and the hourly chart on the home. Empty means no send has been attempted.
+
+  - key: table:email_template;slot:help
+    summary: "A reusable email: a name, category, brand and the versions that hold its subject and body."
+    content: |
+      **How rows get created:** the qbit creates the secure-message template for you; other qbits register theirs (EmailApi.ensureTemplate) and are named in Owner Qbit; or an administrator adds one with New, then writes its first version and runs Activate Version. Only one version is active at a time. Approve For PHI is a separate, explicit step per version.
+
+  - key: table:email_template_version;slot:help
+    summary: "An immutable version of a template: subject, body, variables and locale. Activate one to use it."
+    content: |
+      **How rows get created:** use New Version on a template, edit the draft (Markdown or MJML body, the variables it accepts, sample values), then Activate Version, which checks the template renders. Activated versions never change. Empty means no template has a version yet.
+
+  - key: table:email_brand;slot:help
+    summary: "Look and footer of branded emails: logo, colors for light and dark, footer text and postal address."
+    content: |
+      **How rows get created:** the qbit seeds a neutral, high-contrast brand named neutral (not the default, so it changes nothing until you choose it). Copy it for your own: set the logo (https), colors (contrast is checked), footer and postal address, then tick Default Brand to use it for everything that names no brand. Marketing email needs a default brand with a postal address. Without any default the plain neutral look is used.
+
+  - key: table:email_suppression;slot:help
+    summary: "Addresses that must not receive mail: hard bounces, complaints, unsubscribes and manual blocks."
+    content: |
+      **How rows get created:** automatically when a provider reports a hard bounce or complaint through its webhook, when someone unsubscribes, or by an administrator with New (a manual block, for one category or all). Sends to these addresses are skipped and noted on the message. Empty means nobody has bounced, complained or unsubscribed yet.
+
+  - key: table:email_webhook_inbox;slot:help
+    summary: "Provider webhook calls waiting to be processed, kept so none is lost: status, attempts and errors."
+    content: |
+      **How rows get created:** written when a verified provider webhook (delivery, bounce, complaint) arrives at the qbit's webhook path (/qqq/hooks/email by default), then processed in the background. Reprocess retries a failed one. Empty means no provider has called back; set each provider's webhook secret variable and point the provider at the webhook URL.
+
+  - key: table:email_event;slot:help
+    summary: "Delivery tracking events per message: delivered, bounced, complained, opened, clicked."
+    content: |
+      **How rows get created:** written by the webhook processor from provider callbacks. Read-only; each message's timeline is built from these. Empty means no provider has reported anything yet.
