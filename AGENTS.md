@@ -32,7 +32,7 @@ Design: `docs/DESIGN.md`.
 - `phi`: RC.5 classification/token stand-ins and AES-GCM encryption; only dispatch decrypts bodies.
 - `app/EmailHome`: viewer-scoped counts and inline cards, with standard hourly/suppression chart widgets.
 - Version operations serialize on the template row; active/approved version selectors are parent-scoped.
-- Part 2 upgrade DDL: `docs/ddl/phase-a-part2-postgres.sql`. Preview UI API endpoint awaits RC.6; webhook/unsubscribe handlers remain phase c.
+- Preview UI API endpoint awaits RC.6; webhook/unsubscribe handlers remain phase c.
 
 ## Invariants
 
