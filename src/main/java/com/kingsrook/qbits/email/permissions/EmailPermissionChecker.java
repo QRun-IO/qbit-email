@@ -74,7 +74,7 @@ public class EmailPermissionChecker implements CustomPermissionChecker
       boolean write = actionInput instanceof InsertInput || actionInput instanceof UpdateInput || actionInput instanceof DeleteInput;
       if(metaData instanceof QTableMetaData table)
       {
-         if(EmailTables.PROVIDER.equals(table.getName()))
+         if(EmailTables.PROVIDER.equals(table.getName()) || EmailTables.SENDER.equals(table.getName()))
          {
             return (EmailPermissions.ADMIN);
          }

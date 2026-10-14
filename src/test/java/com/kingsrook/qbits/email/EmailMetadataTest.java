@@ -73,7 +73,7 @@ class EmailMetadataTest
    void producerStandardsAndIntegrationFields() throws Exception
    {
       var instance = QContext.getQInstance();
-      assertThat(instance.getTables()).hasSize(9);
+      assertThat(instance.getTables()).hasSize(10);
       for(var table : instance.getTables().values())
       {
          assertThat(table.getName()).matches("email_[a-z_]+");

@@ -52,6 +52,7 @@ in a static variable.
 | `email_brand` | Brands | `email.manage`; template edit grants also apply |
 | `email_suppression` | Suppressions | `email.manage`; changing/removing a complaint needs `email.admin` |
 | `email_provider` | Providers, with child Messages | `email.admin`, including reads and test sends |
+| `email_provider_sender_address` | Sender Addresses on a provider | `email.admin`, including reads |
 
 `email.view` reads messages, templates, versions, brands and suppressions.
 `email.send` permits the Java service, bridge and backend send process. Reading
@@ -86,6 +87,30 @@ Create the first enabled provider with `isDefault=true`. When any providers are
 enabled, exactly one must be the enabled default. Switch defaults in a batch update,
 clearing the old default first. A nullable unique `default_slot` backs the validation.
 Providers with message history cannot be deleted; disable them instead.
+
+**Sender addresses.** A provider can own any number of verified from addresses, kept in
+`email_provider_sender_address` and shown as a Sender Addresses list on the provider record
+(not in the nav; `email.admin` reads and writes, like the provider). Each row has an
+`address` (validated, stored lowercase, line breaks refused), an optional `displayName`,
+`isDefault`, `enabled` and a `note`. An address is unique per provider, at most one enabled
+row per provider is the default, and when the provider has a `sendingDomain` every address must
+be in that domain (changing the domain with other-domain rows is refused). Deleting a provider
+deletes its rows. Existing databases add the table and the nullable
+`email_message.from_address_id` column from `docs/ddl/email-postgres.sql`.
+
+The provider's own `fromAddress` / `fromName` stay the fallback, so nothing changes until a
+row exists. A row marked default wins over the fallback. On a send, `withFromAddressId(id)`
+(or `fromAddressId` on the send processes) must name an enabled row of the resolved provider,
+and once a provider has rows an explicit `withFrom(...)` must match one of them by address;
+either failure is `REFUSED` with "That from address is not set up for provider <name>". With
+no rows, `withFrom(...)` behaves as before. The chosen row is recorded on the message as
+`fromAddressId`, and a resend reuses it.
+
+The from address pickers are contingent: `fromAddressId` on the send processes lists only the
+rows of the chosen `providerId` (`providerName` is still accepted for API callers, and the two
+must agree), and the Send Test Email action lists only the rows of the provider being tested.
+That action's form has no record id, so a prepare step publishes the single selected provider id
+as the process value `possibleValueFilterValueId`, which the picker's filter reads after `${input.id}`.
 
 For an unauthenticated relay, use kind `SMTP`, host/port, security `NONE`, and a
 `fromAddress`. Leave credential names empty. Authenticated SMTP uses `usernameEnvName`

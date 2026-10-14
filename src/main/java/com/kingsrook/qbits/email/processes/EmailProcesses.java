@@ -90,6 +90,9 @@ public final class EmailProcesses
    public static final String PROCESS_WEBHOOKS = "email_process_webhooks";
    public static final String RETENTION = "email_retention";
 
+   /** Process value the send-test prepare step sets to the selected provider id; the from address filter falls back to it. */
+   public static final String PROVIDER_FILTER_VALUE = "possibleValueFilterValueId";
+
    /*******************************************************************************
     ** Utility class.
     *******************************************************************************/
@@ -116,9 +119,12 @@ public final class EmailProcesses
    public static List<QProcessMetaData> processes(EmailQBitConfig config)
    {
       QProcessMetaData test = action(SEND_TEST, "Send Test Email", EmailTables.PROVIDER);
-      test.withStep(0, new QFrontendStepMetaData().withName("input").withLabel("Recipient")
+      test.withStep(0, new QBackendStepMetaData().withName("prepare").withCode(new QCodeReference(SendTestPrepareStep.class)));
+      test.withStep(1, new QFrontendStepMetaData().withName("input").withLabel("Recipient")
          .withComponent(new QFrontendComponentMetaData().withType(QComponentType.EDIT_FORM))
-         .withFormField(new QFieldMetaData("toAddress", QFieldType.STRING).withLabel("To address").withIsRequired(true)));
+         .withFormField(new QFieldMetaData("toAddress", QFieldType.STRING).withLabel("To address").withIsRequired(true))
+         .withFormField(new QFieldMetaData("fromAddressId", QFieldType.INTEGER).withLabel("From address").withPossibleValueSourceName(EmailTables.SENDER)
+            .withPossibleValueSourceFilter(EmailStore.equal("providerId", "${input.id}??${processValues." + PROVIDER_FILTER_VALUE + "}"))));
       QFunctionInputMetaData inputs = new QFunctionInputMetaData();
       QFunctionInputMetaData adHocInputs = new QFunctionInputMetaData();
       for(String field : List.of("templateName", "to", "cc", "bcc", "replyTo", "subject", "markdownBody", "htmlBody", "textBody", "providerName", "brandName",
@@ -128,6 +134,12 @@ public final class EmailProcesses
          adHocInputs.withField(new QFieldMetaData(field, QFieldType.STRING));
       }
       adHocInputs.withField(new QFieldMetaData("category", QFieldType.STRING));
+      for(QFunctionInputMetaData target : List.of(inputs, adHocInputs))
+      {
+         target.withField(new QFieldMetaData("providerId", QFieldType.INTEGER).withPossibleValueSourceName(EmailTables.PROVIDER));
+         target.withField(new QFieldMetaData("fromAddressId", QFieldType.INTEGER).withPossibleValueSourceName(EmailTables.SENDER)
+            .withPossibleValueSourceFilter(EmailStore.equal("providerId", "${input.providerId}")));
+      }
       QProcessMetaData adHoc = new QProcessMetaData().withName(SEND_AD_HOC).withLabel("Send Ad Hoc Email").withIsHidden(true)
          .withPermissionRules(EmailTables.permissionRules())
          .withStep(new QBackendStepMetaData().withName("send").withCode(new QCodeReference(SendStep.class)).withInputData(adHocInputs));
@@ -294,7 +306,7 @@ public final class EmailProcesses
                   case SEND_NOW -> new EmailDispatcher().sendNow(id).name();
                   case CANCEL -> cancel(id) ? "CANCELLED" : "Skipped";
                   case RESEND -> resend(current).status().name();
-                  case SEND_TEST -> sendTest(current, input.getValueString("toAddress"));
+                  case SEND_TEST -> sendTest(current, input.getValueString("toAddress"), input.getValueInteger("fromAddressId"));
                   default -> "Skipped";
                };
             }
@@ -348,15 +360,43 @@ public final class EmailProcesses
    /*******************************************************************************
     ** Queue and dispatch a fixed provider test message.
     *******************************************************************************/
-   private static String sendTest(QRecord provider, String to) throws QException
+   private static String sendTest(QRecord provider, String to, Integer fromAddressId) throws QException
    {
       if(to == null)
       {
          return ("REFUSED: a to address is required");
       }
-      EmailSendResult result = EmailService.send(new EmailRequest().withProviderName(provider.getValueString("name")).withTo(to)
+      EmailSendResult result = EmailService.send(new EmailRequest().withProviderName(provider.getValueString("name")).withTo(to).withFromAddressId(fromAddressId)
          .withSubject("Email delivery test").withMarkdownBody("This is a test of your email provider.").withSender("email", SEND_TEST));
       return (result.status() == EmailSendResult.Status.QUEUED ? new EmailDispatcher().sendNow(result.messageId()).name() : result.status().name());
+   }
+
+   /*******************************************************************************
+    ** Seeds the from address possible-value filter: a record action's form has no
+    ** record id, so a single selected provider id becomes a process value that the
+    ** filter reads after the form's own ${input.id}.
+    *******************************************************************************/
+   public static class SendTestPrepareStep implements BackendStep
+   {
+      /*******************************************************************************
+       ** Expose the selected provider id when exactly one provider is selected.
+       *******************************************************************************/
+      @Override
+      public void run(RunBackendStepInput input, RunBackendStepOutput output) throws QException
+      {
+         String ids = input.getValueString("recordIds");
+         if(ids != null && !ids.contains(","))
+         {
+            try
+            {
+               output.addValue(PROVIDER_FILTER_VALUE, Integer.valueOf(ids.trim()));
+            }
+            catch(NumberFormatException e)
+            {
+               // Not a single id: the filter stays open and the review step still validates the selection.
+            }
+         }
+      }
    }
 
    /*******************************************************************************
@@ -370,10 +410,20 @@ public final class EmailProcesses
       @Override
       public void run(RunBackendStepInput input, RunBackendStepOutput output) throws QException
       {
-         EmailRequest request = new EmailRequest().withTemplateName(input.getValueString("templateName"))
+         String providerName = input.getValueString("providerName");
+         if(input.getValueInteger("providerId") != null)
+         {
+            QRecord provider = EmailStore.get(EmailTables.PROVIDER, input.getValueInteger("providerId"), null);
+            if(provider == null || providerName != null && !providerName.equals(provider.getValueString("name")))
+            {
+               throw (new QException("providerId does not match an existing provider named providerName"));
+            }
+            providerName = provider.getValueString("name");
+         }
+         EmailRequest request = new EmailRequest().withTemplateName(input.getValueString("templateName")).withFromAddressId(input.getValueInteger("fromAddressId"))
             .withSubject(input.getValueString("subject")).withMarkdownBody(input.getValueString("markdownBody"))
             .withHtmlBody(input.getValueString("htmlBody")).withTextBody(input.getValueString("textBody"))
-            .withReplyTo(input.getValueString("replyTo")).withProviderName(input.getValueString("providerName"))
+            .withReplyTo(input.getValueString("replyTo")).withProviderName(providerName)
             .withBrandName(input.getValueString("brandName")).withIdempotencyKey(input.getValueString("idempotencyKey"))
             .withLinkedRecord(input.getValueString("linkedTableName"), input.getValueString("linkedRecordId"));
          if(input.getValueString("to") != null)
