@@ -105,7 +105,7 @@ class EmailMetadataTest
       assertThat(
                   new EmailApp.HomeRenderer()
                         .render(
-                              new com.kingsrook.qqq.backend.core.model.actions.widgets.RenderWidgetInput()))
+                              new com.kingsrook.qqq.backend.core.model.actions.widgets.RenderWidgetInput().withWidgetMetaData(instance.getWidget(EmailApp.HOME_WIDGET))))
             .isNotNull();
       assertThat(EmailRuntime.isInstalled()).isTrue();
       assertThat(EmailRuntime.config(new QInstance())).isNull();
@@ -215,7 +215,7 @@ class EmailMetadataTest
                   .withSubject("s")
                   .withMarkdownBody("<script>alert(1)</script>\n\n**Hello**");
       assertThat(EmailService.send(new EmailRequest().withTemplateName("later")).reasons())
-            .contains("templates arrive in part 2");
+            .contains("Unknown email template");
       assertThat(EmailService.send(null).status()).isEqualTo(EmailSendResult.Status.REFUSED);
       assertThat(EmailService.send(new EmailRequest()).status())
             .isEqualTo(EmailSendResult.Status.REFUSED);

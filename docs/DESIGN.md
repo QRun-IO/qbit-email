@@ -1,6 +1,6 @@
 # qbit-email design
 
-**Status:** spec. Phases (a) to (d) build outbound; phase (e) is inbound (section 12, design only).
+**Status:** phase (a) implemented; later phases remain specification. Phases (a) to (d) build outbound; phase (e) is inbound (section 12, design only).
 **Brief:** owner decisions of 2026-10-13 (providers, outbound first, both template kinds).
 **Owner decisions (2026-10-12): all recommendations accepted.** Every "Recommended" choice and
 every decision below stands; it is adjusted once it can be seen working.
@@ -255,10 +255,39 @@ the exact version it used.
   version, else the default locale's. One locale (`en`) ships.
 
 ### 5.3 Preview
+
+**Part 2 status:** standard record widget implemented. Next's sanitizer removes
+iframes and style blocks, so it uses sanitized inline light (390px maximum) and dark
+(600px maximum) samples, with wrapping plain text. Draft MJML previews compile in memory
+with the configured compiler; stored versions are unchanged. TODO: endpoint arrives with RC.6.
+
 Each version record shows a **Preview** widget: the rendered email with the sample variables in a
 sandboxed iframe (`srcdoc`, scripts disabled), Light/Dark and 390/600 px toggles, and the plain
 text. It is served through the UI API (section 10): `POST /qqq/v1/qbit/email/preview` (a version
 id, or unsaved source, plus variables) returns subject, html, text and warnings.
+
+### 5.4 Part 2 implementation choices
+- Approval records `approved_version_id` on the template. An approved DRAFT freezes;
+  approve a new sensitive version before activation. Activating a different,
+  unapproved version clears approval. Approval is specific to one locale version.
+- `EmailBuiltIns.ensure()` seeds `email_secure_message` on its first send, using the
+  database unique name and a transaction, with no static bootstrap cache.
+- `dark_primary_color` and `dark_button_text_color` optionally override their light
+  counterparts; both button pairs are contrast-checked. Brand colors use #RRGGBB.
+- `EmailTemplatedMessageInput` extends core SendMessageInput for schema variables and
+  record references. Ordinary core input remains compatible ad-hoc content.
+- RC.5 QueryAction masks passwords but does not apply ordinary FieldSecurityLock;
+  record-variable loading additionally applies that lock to sender session keys.
+- The real outbox id is bound during the enqueue transaction, before commit. Failed
+  validation persists no message. Resends preserve encrypted content and its original
+  token snapshot, linking to the original message for the token binding.
+- The home follows the newer Alerts pattern: standard QQQ chart widgets plus inline,
+  theme-neutral cards. All queries/counts use the viewer's session. Bounce/complaint
+  dates have dedicated columns for phase-(c) events; no dates or metrics are invented.
+- Part 2 signs opt-out links and prepares headers; the receiving unsubscribe handler
+  remains phase (c). Without its key/base URL, notification omits opt-out links and
+  headers, while marketing refuses as specified in 8.2. Do not use opt-out delivery
+  without a receiving handler. The token's address hash covers the recipient envelope.
 
 ## 6. Delivery tracking
 
@@ -438,8 +467,8 @@ and appLabel, securityFields and recordSecurityLocks (multi-tenant hosts).
 ## 15. Phases and acceptance
 | Phase | Scope | Acceptance (tests) |
 |---|---|---|
-| (a) | tables, outbox and dispatcher, SMTP and SES, Markdown templates and versions, brands and the layout, preview, EmailService, the process, the core bridge, PHI refusal and redaction, the app home | GreenMail SMTP sink end to end; SES through a mocked `SesV2Client`; the claim race (two runners, each message sent once); retry, dead letter, idempotency; rendering (variables, escaping, `#if`/`#each`, plain text, dark-mode contrast); PHI refusal; snapshot redaction; the canary test; producer standards (names, nav, permissions) |
-| (b) | Postmark, SendGrid, Mailgun, Gmail SMTP; MJML and HTML templates | HTTP mocks per provider (success, 4xx permanent, 429/5xx transient); MJML through a fake compiler; the Gmail preset |
+| (a) | tables, outbox and dispatcher, SMTP and SES, Markdown/HTML/MJML templates and versions, brands and the layout, preview, EmailService, the process, the core bridge, PHI refusal and redaction, the app home | GreenMail SMTP sink end to end; SES through a mocked `SesV2Client`; the claim race (two runners, each message sent once); retry, dead letter, idempotency; rendering (variables, escaping, `#if`/`#each`, plain text, dark-mode contrast); PHI refusal; snapshot redaction; the canary test; producer standards (names, nav, permissions) |
+| (b) | Postmark, SendGrid, Mailgun, Gmail SMTP | HTTP mocks per provider (success, 4xx permanent, 429/5xx transient); the Gmail preset. HTML/MJML moved into part (a), part 2 at owner request. |
 | (c) | webhook route and inbox, events, suppression, unsubscribe, Preferences section | signature verification per provider (valid, tampered, stale, missing secret); the SNS certificate host rule; suppression on hard bounce and complaint; one-click POST and the GET page; category rules |
 | (d) | consumer migrations | each consumer's own tests; a contract test of `EmailService` |
 | (e) | inbound | design only for now |

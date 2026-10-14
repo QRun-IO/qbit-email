@@ -239,6 +239,11 @@ public final class EmailTableCustomizers
       @Override
       public List<QRecord> postQuery(QueryOrGetInputInterface input, List<QRecord> records)
       {
+         for(QRecord row : records)
+         {
+            String label = row.getValueString("label");
+            row.setRecordLabel(label == null || label.isBlank() ? row.getValueString("name") : label);
+         }
          if(!SystemWrites.active())
          {
             for(QRecord row : records)
@@ -339,6 +344,27 @@ public final class EmailTableCustomizers
       @Override
       public List<QRecord> postQuery(QueryOrGetInputInterface input, List<QRecord> records)
       {
+         if(!SystemWrites.active())
+         {
+            for(QRecord row : records)
+            {
+               for(String field : List.of("subject", "htmlBody", "textBody"))
+               {
+                  String value = row.getValueString(field);
+                  if(value != null && value.startsWith("enc:v1:"))
+                  {
+                     row.setValue(field, "[encrypted]");
+                     row.setDisplayValue(field, "[encrypted]");
+                  }
+               }
+            }
+         }
+         for(QRecord row : records)
+         {
+            String subject = row.getValueString("subject");
+            boolean secure = Boolean.TRUE.equals(row.getValueBoolean("phiApproved")) || "[encrypted]".equals(subject) || (subject != null && subject.startsWith("enc:v1:"));
+            row.setRecordLabel(secure ? "Secure message" : subject == null || subject.isBlank() ? "Message " + row.getValue("id") : subject);
+         }
          if(input.getShouldGenerateDisplayValues())
          {
             for(QRecord row : records)

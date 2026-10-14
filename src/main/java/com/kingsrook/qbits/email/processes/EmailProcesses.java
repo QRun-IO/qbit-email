@@ -33,7 +33,6 @@ import com.kingsrook.qbits.email.EmailRuntime;
 import com.kingsrook.qbits.email.delivery.EmailDispatcher;
 import com.kingsrook.qbits.email.metadata.EmailTables;
 import com.kingsrook.qbits.email.outbox.EmailCategory;
-import com.kingsrook.qbits.email.outbox.EmailRenderer;
 import com.kingsrook.qbits.email.outbox.EmailRequest;
 import com.kingsrook.qbits.email.outbox.EmailSendResult;
 import com.kingsrook.qbits.email.outbox.EmailService;
@@ -76,10 +75,14 @@ import com.kingsrook.qqq.backend.core.processes.implementations.etl.streamedwith
  *******************************************************************************/
 public final class EmailProcesses
 {
+   public static final String NEW_VERSION = "email_new_version";
+   public static final String ACTIVATE_VERSION = "email_activate_version";
+   public static final String APPROVE_PHI = "email_approve_phi";
    public static final String RESEND = "email_resend";
    public static final String CANCEL = "email_cancel";
    public static final String SEND_NOW = "email_send_now";
    public static final String SEND_TEST = "email_send_test";
+   public static final String SEND_AD_HOC = "email_send_ad_hoc";
    public static final String SEND_TEMPLATED = "email_send_templated";
    public static final String DISPATCH = "email_dispatch";
    public static final String MAINTAIN = "email_maintain";
@@ -99,8 +102,8 @@ public final class EmailProcesses
    {
       return (switch(name)
       {
-         case RESEND, CANCEL, SEND_NOW -> EmailPermissions.MANAGE;
-         case SEND_TEMPLATED -> EmailPermissions.SEND;
+         case RESEND, CANCEL, SEND_NOW, NEW_VERSION, ACTIVATE_VERSION -> EmailPermissions.MANAGE;
+         case SEND_TEMPLATED, SEND_AD_HOC -> EmailPermissions.SEND;
          default -> EmailPermissions.ADMIN;
       });
    }
@@ -115,16 +118,24 @@ public final class EmailProcesses
          .withComponent(new QFrontendComponentMetaData().withType(QComponentType.EDIT_FORM))
          .withFormField(new QFieldMetaData("toAddress", QFieldType.STRING).withLabel("To address").withIsRequired(true)));
       QFunctionInputMetaData inputs = new QFunctionInputMetaData();
+      QFunctionInputMetaData adHocInputs = new QFunctionInputMetaData();
       for(String field : List.of("templateName", "to", "cc", "bcc", "replyTo", "subject", "markdownBody", "htmlBody", "textBody", "providerName", "brandName",
-         "category", "variablesJson", "linkedTableName", "linkedRecordId", "idempotencyKey"))
+         "locale", "variablesJson", "recordVariablesJson", "linkedTableName", "linkedRecordId", "idempotencyKey"))
       {
          inputs.withField(new QFieldMetaData(field, QFieldType.STRING));
+         adHocInputs.withField(new QFieldMetaData(field, QFieldType.STRING));
       }
+      adHocInputs.withField(new QFieldMetaData("category", QFieldType.STRING));
+      QProcessMetaData adHoc = new QProcessMetaData().withName(SEND_AD_HOC).withLabel("Send Ad Hoc Email").withIsHidden(true)
+         .withPermissionRules(EmailTables.permissionRules())
+         .withStep(new QBackendStepMetaData().withName("send").withCode(new QCodeReference(SendStep.class)).withInputData(adHocInputs));
       QProcessMetaData send = new QProcessMetaData().withName(SEND_TEMPLATED).withLabel("Send Email").withIsHidden(true)
          .withPermissionRules(EmailTables.permissionRules())
          .withStep(new QBackendStepMetaData().withName("send").withCode(new QCodeReference(SendStep.class)).withInputData(inputs));
       return (List.of(action(RESEND, "Resend", EmailTables.MESSAGE), action(CANCEL, "Cancel", EmailTables.MESSAGE),
-         action(SEND_NOW, "Send Now", EmailTables.MESSAGE), test, send,
+         action(SEND_NOW, "Send Now", EmailTables.MESSAGE), test, send, adHoc,
+         action(NEW_VERSION, "New Version", EmailTables.TEMPLATE), action(ACTIVATE_VERSION, "Activate Version", EmailTables.VERSION),
+         action(APPROVE_PHI, "Approve For PHI", EmailTables.VERSION),
          scheduled(config, DISPATCH, "Dispatch Email", config.getDispatchIntervalSeconds()),
          scheduled(config, MAINTAIN, "Maintain Email", 300), scheduled(config, RETENTION, "Email Retention", 86400)));
    }
@@ -164,6 +175,14 @@ public final class EmailProcesses
     *******************************************************************************/
    private static boolean eligible(String process, QRecord row)
    {
+      if(NEW_VERSION.equals(process))
+      {
+         return (true);
+      }
+      if(ACTIVATE_VERSION.equals(process) || APPROVE_PHI.equals(process))
+      {
+         return ("DRAFT".equals(row.getValueString("status")) || APPROVE_PHI.equals(process) && "ACTIVE".equals(row.getValueString("status")));
+      }
       if(SEND_TEST.equals(process))
       {
          return (Boolean.TRUE.equals(row.getValueBoolean("enabled")));
@@ -188,12 +207,30 @@ public final class EmailProcesses
        ** Filter rows and explain skipped records.
        *******************************************************************************/
       @Override
-      public void runOnePage(RunBackendStepInput input, RunBackendStepOutput output)
+      public void runOnePage(RunBackendStepInput input, RunBackendStepOutput output) throws QException
       {
          for(QRecord row : input.getRecords())
          {
             boolean valid = eligible(input.getProcessName(), row);
-            lines.add(new ProcessSummaryLine(valid ? Status.OK : Status.INFO, 1, valid ? "record will be processed" : "record skipped: status or retained content does not permit this action"));
+            String diagnostic = valid ? "record will be processed" : "record skipped: status or retained content does not permit this action";
+            if(valid && List.of(NEW_VERSION, ACTIVATE_VERSION, APPROVE_PHI).contains(input.getProcessName()))
+            {
+               try
+               {
+                  QRecord template = NEW_VERSION.equals(input.getProcessName()) ? row : EmailStore.get(EmailTables.TEMPLATE, row.getValueInteger("templateId"), null);
+                  com.kingsrook.qbits.email.template.EmailVersions.requireEdit(template, APPROVE_PHI.equals(input.getProcessName()));
+                  if(ACTIVATE_VERSION.equals(input.getProcessName()))
+                  {
+                     com.kingsrook.qbits.email.template.EmailVersions.validate(template, row);
+                  }
+               }
+               catch(IllegalArgumentException e)
+               {
+                  valid = false;
+                  diagnostic = e.getMessage();
+               }
+            }
+            lines.add(new ProcessSummaryLine(valid ? Status.OK : Status.INFO, 1, diagnostic));
             if(valid)
             {
                output.getRecords().add(row);
@@ -228,12 +265,24 @@ public final class EmailProcesses
          for(QRecord row : input.getRecords())
          {
             Integer id = row.getValueInteger("id");
-            QRecord current = EmailStore.get(SEND_TEST.equals(process) ? EmailTables.PROVIDER : EmailTables.MESSAGE, id, null);
+            QRecord current = EmailStore.get(NEW_VERSION.equals(process) ? EmailTables.TEMPLATE : List.of(ACTIVATE_VERSION, APPROVE_PHI).contains(process) ? EmailTables.VERSION
+               : SEND_TEST.equals(process) ? EmailTables.PROVIDER : EmailTables.MESSAGE, id, null);
             String result = "Skipped";
             if(current != null && eligible(process, current))
             {
                result = switch(process)
                {
+                  case NEW_VERSION -> "Created DRAFT " + com.kingsrook.qbits.email.template.EmailVersions.newVersion(id).getValueInteger("versionNumber");
+                  case ACTIVATE_VERSION ->
+                  {
+                     com.kingsrook.qbits.email.template.EmailVersions.activate(id);
+                     yield "ACTIVE";
+                  }
+                  case APPROVE_PHI ->
+                  {
+                     com.kingsrook.qbits.email.template.EmailVersions.approve(id);
+                     yield "Approved for PHI";
+                  }
                   case SEND_NOW -> new EmailDispatcher().sendNow(id).name();
                   case CANCEL -> cancel(id) ? "CANCELLED" : "Skipped";
                   case RESEND -> resend(current).status().name();
@@ -285,29 +334,7 @@ public final class EmailProcesses
     *******************************************************************************/
    private static EmailSendResult resend(QRecord row) throws QException
    {
-      QRecord provider = EmailStore.get(EmailTables.PROVIDER, row.getValueInteger("providerId"), null);
-      EmailRequest request = new EmailRequest().withSubject(row.getValueString("subject")).withHtmlBody(row.getValueString("htmlBody"))
-         .withTextBody(row.getValueString("textBody")).withFrom(row.getValueString("fromAddress")).withReplyTo(row.getValueString("replyTo"))
-         .withProviderName(provider.getValueString("name")).withCategory(EmailCategory.valueOf(row.getValueString("category")))
-         .withLinkedRecord(EmailTables.MESSAGE, row.getValue("id")).withSender("email", RESEND);
-      for(String field : List.of("toAddresses", "ccAddresses", "bccAddresses"))
-      {
-         String value = row.getValueString(field);
-         if(value != null && !value.isBlank())
-         {
-            switch(field)
-            {
-               case "toAddresses" -> request.withTo(value);
-               case "ccAddresses" -> request.withCc(value);
-               default -> request.withBcc(value);
-            }
-         }
-      }
-      for(var field : EmailRuntime.config().getSecurityFields())
-      {
-         request.getSecurityValues().put(field.getName(), row.getValue(field.getName()));
-      }
-      return (EmailService.send(request, ignored -> new EmailRenderer.Rendered(row.getValueString("htmlBody"), row.getValueString("textBody"))));
+      return (EmailService.resend(row.getValueInteger("id")));
    }
 
    /*******************************************************************************
@@ -355,9 +382,25 @@ public final class EmailProcesses
          }
          if(input.getValueString("variablesJson") != null)
          {
-            request.withVariable("variablesJson", input.getValueString("variablesJson"));
+            request.withVariables(com.kingsrook.qbits.email.template.VariableSchema.values(input.getValueString("variablesJson")));
          }
-         if(input.getValueString("category") != null)
+         if(input.getValueString("locale") != null)
+         {
+            request.withLocale(input.getValueString("locale"));
+         }
+         if(input.getValueString("recordVariablesJson") != null)
+         {
+            var bindings = com.kingsrook.qbits.email.template.VariableSchema.values(input.getValueString("recordVariablesJson"));
+            for(var binding : bindings.entrySet())
+            {
+               if(!(binding.getValue() instanceof Map<?, ?> ref) || !(ref.get("table") instanceof String table) || !(ref.get("id") instanceof Serializable id))
+               {
+                  throw (new QException("Record variables need table and id"));
+               }
+               request.withRecordVariable(binding.getKey(), table, id);
+            }
+         }
+         if(request.getTemplateName() == null && input.getValueString("category") != null)
          {
             try
             {

@@ -96,6 +96,14 @@ public final class EmailTables
       result.add(QPossibleValueSource.newForEnum("email_suppression_reason", EmailEnums.SuppressionReason.values()));
       result.add(QPossibleValueSource.newForEnum("email_category", EmailCategory.values()));
       ALL.forEach(name -> result.add(QPossibleValueSource.newForTable(name)));
+      for(QPossibleValueSource source : result)
+      {
+         if(List.of(PROVIDER, MESSAGE, VERSION).contains(source.getName()))
+         {
+            source.withSearchFields(PROVIDER.equals(source.getName()) ? List.of("label", "name") : MESSAGE.equals(source.getName()) ? List.of("subject") : List.of("versionNumber", "locale"))
+               .withOrderByField("id");
+         }
+      }
       return (result);
    }
 
@@ -189,7 +197,7 @@ public final class EmailTables
          .withField(field("lastFailureMessage", QFieldType.STRING).withMaxLength(500))
          .withField(field("dispatchLock", QFieldType.INTEGER).withDefaultValue(0).withIsHidden(true).withIsEditable(false))
          .withField(field("defaultSlot", QFieldType.INTEGER).withIsHidden(true).withIsEditable(false));
-      table.withRecordLabelFormatAndFields("%s", "name");
+      table.withRecordLabelFormat(null).withRecordLabelFields(List.of());
       table.withUniqueKey(new UniqueKey("name"));
       table.withUniqueKey(new UniqueKey("defaultSlot"));
       table.withSection(SectionFactory.defaultT1("id", "name", "label", "kind", "enabled", "isDefault"));
@@ -214,13 +222,15 @@ public final class EmailTables
          .withField(field("replyTo", QFieldType.STRING).withIsSensitive(true).withMaxLength(500))
          .withField(field("subject", QFieldType.TEXT).withIsSensitive(true))
          .withField(field("templateId", QFieldType.INTEGER).withPossibleValueSourceName(TEMPLATE))
-         .withField(field("templateVersionId", QFieldType.INTEGER).withPossibleValueSourceName(VERSION))
+         .withField(field("templateVersionId", QFieldType.INTEGER).withPossibleValueSourceName(VERSION).withPossibleValueSourceFilter(com.kingsrook.qbits.email.support.EmailStore.equal("templateId", "${input.templateId}")))
          .withField(field("brandId", QFieldType.INTEGER).withPossibleValueSourceName(BRAND))
          .withField(field("category", QFieldType.STRING).withPossibleValueSourceName("email_category").withMaxLength(500))
          .withField(field("locale", QFieldType.STRING).withDefaultValue("en").withMaxLength(500))
          .withField(field("variablesSnapshot", QFieldType.TEXT).withIsSensitive(true))
          .withField(field("htmlBody", QFieldType.TEXT).withIsSensitive(true))
          .withField(field("textBody", QFieldType.TEXT).withIsSensitive(true))
+         .withField(field("phiApproved", QFieldType.BOOLEAN).withDefaultValue(false).withIsEditable(false))
+         .withField(field("unsubscribeUrl", QFieldType.TEXT))
          .withField(field("bodySha256", QFieldType.STRING).withMaxLength(500))
          .withField(field("idempotencyKey", QFieldType.STRING).withMaxLength(500))
          .withField(field("providerId", QFieldType.INTEGER).withPossibleValueSourceName(PROVIDER))
@@ -232,6 +242,8 @@ public final class EmailTables
          .withField(field("finishedDate", QFieldType.DATE_TIME))
          .withField(field("sentDate", QFieldType.DATE_TIME))
          .withField(field("deliveredDate", QFieldType.DATE_TIME))
+         .withField(field("bouncedDate", QFieldType.DATE_TIME))
+         .withField(field("complainedDate", QFieldType.DATE_TIME))
          .withField(field("deadLetterDate", QFieldType.DATE_TIME))
          .withField(field("linkedTableName", QFieldType.STRING).withMaxLength(500))
          .withField(field("linkedRecordId", QFieldType.STRING).withMaxLength(500)
@@ -240,9 +252,11 @@ public final class EmailTables
          .withField(field("senderProcess", QFieldType.STRING).withMaxLength(500))
          .withField(field("suppressedAddresses", QFieldType.TEXT).withIsSensitive(true))
          .withField(field("sendAfter", QFieldType.DATE_TIME));
+      table.withRecordLabelFormat(null).withRecordLabelFields(List.of());
+      table.getField("subject").setIsHeavy(false);
       table.withUniqueKey(new UniqueKey("idempotencyKey"));
       table.withSection(SectionFactory.defaultT1("id", "status", "toAddresses", "ccAddresses", "bccAddresses", "fromAddress"));
-      table.withSection(SectionFactory.defaultT2("replyTo", "subject", "templateId", "templateVersionId", "brandId", "category", "locale", "variablesSnapshot", "htmlBody", "textBody", "bodySha256", "idempotencyKey", "providerId", "providerMessageId", "attemptCount", "nextAttemptDate", "leaseExpiresDate", "lastError", "finishedDate", "sentDate", "deliveredDate", "deadLetterDate", "linkedTableName", "linkedRecordId", "senderQbit", "senderProcess", "suppressedAddresses", "sendAfter"));
+      table.withSection(SectionFactory.defaultT2("replyTo", "subject", "templateId", "templateVersionId", "brandId", "category", "locale", "variablesSnapshot", "htmlBody", "textBody", "phiApproved", "unsubscribeUrl", "bodySha256", "idempotencyKey", "providerId", "providerMessageId", "attemptCount", "nextAttemptDate", "leaseExpiresDate", "lastError", "finishedDate", "sentDate", "deliveredDate", "bouncedDate", "complainedDate", "deadLetterDate", "linkedTableName", "linkedRecordId", "senderQbit", "senderProcess", "suppressedAddresses", "sendAfter"));
       table.withSection(SectionFactory.defaultT3("createDate", "modifyDate"));
       table.withSection(SectionFactory.customT2("children", new QIcon("list")).withLabel("Attempts").withWidgetName(MESSAGE + "_children"));
       return (table);
@@ -284,17 +298,19 @@ public final class EmailTables
          .withField(field("category", QFieldType.STRING).withPossibleValueSourceName("email_category").withMaxLength(500))
          .withField(field("kind", QFieldType.STRING).withPossibleValueSourceName("email_template_kind").withIsRequired(true).withMaxLength(500))
          .withField(field("brandId", QFieldType.INTEGER).withPossibleValueSourceName(BRAND))
-         .withField(field("activeVersionId", QFieldType.INTEGER).withPossibleValueSourceName(VERSION))
-         .withField(field("phiApproved", QFieldType.BOOLEAN).withDefaultValue(false))
-         .withField(field("phiApprovedBy", QFieldType.STRING).withMaxLength(500))
-         .withField(field("phiApprovedDate", QFieldType.DATE_TIME))
+         .withField(field("activeVersionId", QFieldType.INTEGER).withPossibleValueSourceName(VERSION).withIsEditable(false).withPossibleValueSourceFilter(com.kingsrook.qbits.email.support.EmailStore.equal("templateId", "${input.id}")))
+         .withField(field("approvedVersionId", QFieldType.INTEGER).withIsEditable(false).withPossibleValueSourceName(VERSION).withPossibleValueSourceFilter(com.kingsrook.qbits.email.support.EmailStore.equal("templateId", "${input.id}")))
+         .withField(field("versionLock", QFieldType.INTEGER).withIsHidden(true).withIsEditable(false))
+         .withField(field("phiApproved", QFieldType.BOOLEAN).withDefaultValue(false).withIsEditable(false))
+         .withField(field("phiApprovedBy", QFieldType.STRING).withMaxLength(500).withIsEditable(false))
+         .withField(field("phiApprovedDate", QFieldType.DATE_TIME).withIsEditable(false))
          .withField(field("editPermissionName", QFieldType.STRING).withMaxLength(500))
          .withField(field("ownerQbit", QFieldType.STRING).withMaxLength(500))
          .withField(field("description", QFieldType.TEXT));
       table.withRecordLabelFormatAndFields("%s", "name");
       table.withUniqueKey(new UniqueKey("name"));
       table.withSection(SectionFactory.defaultT1("id", "name", "label", "category", "kind", "brandId"));
-      table.withSection(SectionFactory.defaultT2("activeVersionId", "phiApproved", "phiApprovedBy", "phiApprovedDate", "editPermissionName", "ownerQbit", "description"));
+      table.withSection(SectionFactory.defaultT2("activeVersionId", "approvedVersionId", "phiApproved", "phiApprovedBy", "phiApprovedDate", "editPermissionName", "ownerQbit", "description"));
       table.withSection(SectionFactory.defaultT3("createDate", "modifyDate"));
       table.withSection(SectionFactory.customT2("children", new QIcon("list")).withLabel("Versions").withWidgetName(TEMPLATE + "_children"));
       return (table);
@@ -307,20 +323,22 @@ public final class EmailTables
    private static QTableMetaData templateversion(EmailQBitConfig config)
    {
       QTableMetaData table = base(config, VERSION, "Template Version")
-         .withField(field("templateId", QFieldType.INTEGER).withPossibleValueSourceName(TEMPLATE))
-         .withField(field("versionNumber", QFieldType.INTEGER))
-         .withField(field("status", QFieldType.STRING).withPossibleValueSourceName("email_version_status").withMaxLength(500))
-         .withField(field("locale", QFieldType.STRING).withDefaultValue("en").withMaxLength(500))
+         .withField(field("templateId", QFieldType.INTEGER).withPossibleValueSourceName(TEMPLATE).withIsRequired(true))
+         .withField(field("versionNumber", QFieldType.INTEGER).withIsRequired(true))
+         .withField(field("status", QFieldType.STRING).withPossibleValueSourceName("email_version_status").withDefaultValue("DRAFT").withIsEditable(false).withMaxLength(500))
+         .withField(field("locale", QFieldType.STRING).withDefaultValue("en").withMaxLength(500).withIsRequired(true))
          .withField(field("subject", QFieldType.TEXT).withIsSensitive(true))
          .withField(field("preheader", QFieldType.TEXT))
          .withField(field("bodySource", QFieldType.TEXT))
          .withField(field("textSource", QFieldType.TEXT))
-         .withField(field("compiledHtml", QFieldType.TEXT))
+         .withField(field("compiledHtml", QFieldType.TEXT).withIsEditable(false))
          .withField(field("variablesSchema", QFieldType.TEXT))
          .withField(field("sampleVariables", QFieldType.TEXT))
          .withField(field("createdBy", QFieldType.STRING).withMaxLength(500))
          .withField(field("activatedDate", QFieldType.DATE_TIME));
+      table.withRecordLabelFormat(null).withRecordLabelFields(List.of());
       table.withUniqueKey(new UniqueKey("templateId", "versionNumber", "locale"));
+      table.withSection(SectionFactory.customT2("preview", new QIcon("preview")).withLabel("Preview").withWidgetName("emailTemplatePreview"));
       table.withSection(SectionFactory.defaultT1("id", "templateId", "versionNumber", "status", "locale", "subject"));
       table.withSection(SectionFactory.defaultT2("preheader", "bodySource", "textSource", "compiledHtml", "variablesSchema", "sampleVariables", "createdBy", "activatedDate"));
       table.withSection(SectionFactory.defaultT3("createDate", "modifyDate"));
@@ -343,6 +361,8 @@ public final class EmailTables
          .withField(field("textColor", QFieldType.STRING).withMaxLength(500))
          .withField(field("backgroundColor", QFieldType.STRING).withMaxLength(500))
          .withField(field("darkBackgroundColor", QFieldType.STRING).withMaxLength(500))
+         .withField(field("darkPrimaryColor", QFieldType.STRING).withMaxLength(500))
+         .withField(field("darkButtonTextColor", QFieldType.STRING).withMaxLength(500))
          .withField(field("darkTextColor", QFieldType.STRING).withMaxLength(500))
          .withField(field("buttonTextColor", QFieldType.STRING).withMaxLength(500))
          .withField(field("footerMarkdown", QFieldType.TEXT))
@@ -354,7 +374,7 @@ public final class EmailTables
       table.withRecordLabelFormatAndFields("%s", "name");
       table.withUniqueKey(new UniqueKey("name"));
       table.withSection(SectionFactory.defaultT1("id", "name", "label", "logoUrl", "logoDarkUrl", "logoAlt"));
-      table.withSection(SectionFactory.defaultT2("primaryColor", "textColor", "backgroundColor", "darkBackgroundColor", "darkTextColor", "buttonTextColor", "footerMarkdown", "postalAddress", "socialLinks", "siteUrl", "isDefault", "appName"));
+      table.withSection(SectionFactory.defaultT2("primaryColor", "textColor", "backgroundColor", "darkBackgroundColor", "darkTextColor", "darkPrimaryColor", "darkButtonTextColor", "buttonTextColor", "footerMarkdown", "postalAddress", "socialLinks", "siteUrl", "isDefault", "appName"));
       table.withSection(SectionFactory.defaultT3("createDate", "modifyDate"));
       return (table);
    }

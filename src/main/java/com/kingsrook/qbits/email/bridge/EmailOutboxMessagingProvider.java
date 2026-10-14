@@ -59,7 +59,8 @@ public class EmailOutboxMessagingProvider implements MessagingProviderInterface
       {
          throw (new QException("Email attachments are not supported in part 1"));
       }
-      EmailRequest request = new EmailRequest().withSubject(input.getSubject());
+      EmailRequest request = input instanceof EmailTemplatedMessageInput templated && templated.getEmailRequest() != null
+         ? templated.getEmailRequest() : new EmailRequest().withSubject(input.getSubject());
       parties(request, input.getTo(), EmailPartyRole.TO);
       parties(request, input.getFrom(), EmailPartyRole.FROM);
       if(input.getContentList() != null)

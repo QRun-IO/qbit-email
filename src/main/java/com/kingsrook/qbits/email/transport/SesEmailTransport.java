@@ -64,9 +64,9 @@ public class SesEmailTransport implements EmailTransport
    }
 
    /*******************************************************************************
-    ** Package-visible fake-client seam.
+    ** Injectable client factory for embedded hosts and local demonstrations.
     *******************************************************************************/
-   SesEmailTransport(Function<SesV2ClientBuilder, SesV2Client> clientFactory)
+   public SesEmailTransport(Function<SesV2ClientBuilder, SesV2Client> clientFactory)
    {
       this.clientFactory = clientFactory;
    }

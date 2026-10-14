@@ -130,7 +130,7 @@ public final class EmailEnums
       @Override
       public String getPossibleValueLabel()
       {
-         return (name().charAt(0) + name().substring(1).toLowerCase(java.util.Locale.ROOT).replace('_', ' '));
+         return (this == RETRY_WAIT ? "Waiting to retry" : name().charAt(0) + name().substring(1).toLowerCase(java.util.Locale.ROOT).replace('_', ' '));
       }
    }
 

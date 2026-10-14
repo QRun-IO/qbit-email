@@ -21,15 +21,10 @@
 package com.kingsrook.qbits.email.outbox;
 
 
-import java.util.List;
-import org.commonmark.ext.autolink.AutolinkExtension;
-import org.commonmark.ext.gfm.tables.TablesExtension;
-import org.commonmark.parser.Parser;
-import org.commonmark.renderer.html.HtmlRenderer;
 
 
 /*******************************************************************************
- ** Minimal part 1 layout. Markdown raw HTML and unsafe URL schemes are disabled.
+ ** Branded ad-hoc rendering. Markdown raw HTML and unsafe URL schemes are disabled.
  *******************************************************************************/
 public class AdHocEmailRenderer implements EmailRenderer
 {
@@ -39,36 +34,22 @@ public class AdHocEmailRenderer implements EmailRenderer
    @Override
    public Rendered render(EmailRequest request)
    {
-      String html = request.getHtmlBody();
-      if(html == null)
+      try
       {
-         if(request.getMarkdownBody() != null)
+         var brand = com.kingsrook.qbits.email.render.EmailBrands.resolve(request.getBrandName(), null);
+         String html = request.getHtmlBody();
+         if(html == null)
          {
-            var extensions = List.of(TablesExtension.create(), AutolinkExtension.create());
-            html = HtmlRenderer.builder().escapeHtml(true).sanitizeUrls(true).extensions(extensions).build()
-               .render(Parser.builder().extensions(extensions).build().parse(request.getMarkdownBody()));
+            String body = request.getMarkdownBody() == null ? "<pre>" + com.kingsrook.qbits.email.template.EmailTemplateEngine.escape(request.getTextBody()) + "</pre>"
+               : com.kingsrook.qbits.email.render.EmailMarkdown.render(request.getMarkdownBody(), brand);
+            html = com.kingsrook.qbits.email.render.EmailLayout.render(body, "", brand,
+               request.getCategory() == null ? EmailCategory.TRANSACTIONAL : request.getCategory(), "");
          }
-         else
-         {
-            html = "<pre>" + escape(request.getTextBody()) + "</pre>";
-         }
+         return (new Rendered(html, request.getTextBody() == null ? com.kingsrook.qbits.email.render.HtmlToText.convert(html) : request.getTextBody()));
       }
-      String text = request.getTextBody();
-      if(text == null)
+      catch(com.kingsrook.qqq.backend.core.exceptions.QException e)
       {
-         text = html.replaceAll("(?is)<(script|style)[^>]*>.*?</\\1>", "")
-            .replaceAll("(?i)<br\\s*/?>|</(p|div|li|h[1-6]|tr)>", "\n")
-            .replaceAll("<[^>]+>", "").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
-            .replace("&#39;", "'").replace("&nbsp;", " ").replace("&amp;", "&").strip();
+         throw (new IllegalArgumentException("Email brand is unavailable"));
       }
-      return (new Rendered("<!doctype html><html><body><main>" + html + "</main></body></html>", text));
-   }
-
-   /*******************************************************************************
-    ** Escape plain text for the fallback HTML part.
-    *******************************************************************************/
-   private static String escape(String text)
-   {
-      return (text == null ? "" : text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"));
    }
 }

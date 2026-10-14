@@ -143,7 +143,8 @@ public class EmailQBitProducer implements QBitMetaDataProducer<EmailQBitConfig>
       for(QTableMetaData table : EmailTables.tables(qBitConfig))
       {
          Class<?> customizer = EmailTables.PROVIDER.equals(table.getName()) ? EmailTableCustomizers.ProviderCustomizer.class
-            : EmailTables.SUPPRESSION.equals(table.getName()) ? EmailTableCustomizers.SuppressionCustomizer.class : null;
+            : EmailTables.SUPPRESSION.equals(table.getName()) ? EmailTableCustomizers.SuppressionCustomizer.class
+            : List.of(EmailTables.TEMPLATE, EmailTables.VERSION, EmailTables.BRAND).contains(table.getName()) ? com.kingsrook.qbits.email.template.EmailTemplateCustomizers.class : null;
          if(customizer != null)
          {
             table.withCustomizer(TableCustomizers.PRE_INSERT_RECORD, new QCodeReference(customizer))
@@ -153,6 +154,10 @@ public class EmailQBitProducer implements QBitMetaDataProducer<EmailQBitConfig>
          if(EmailTables.MESSAGE.equals(table.getName()))
          {
             table.withCustomizer(TableCustomizers.POST_QUERY_RECORD, new QCodeReference(EmailTableCustomizers.MessageLinksCustomizer.class));
+         }
+         if(EmailTables.VERSION.equals(table.getName()))
+         {
+            table.withCustomizer(TableCustomizers.POST_QUERY_RECORD, new QCodeReference(com.kingsrook.qbits.email.template.EmailVersionLabels.class));
          }
          if(EmailTables.PROVIDER.equals(table.getName()))
          {

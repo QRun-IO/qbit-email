@@ -20,14 +20,19 @@ Design: `docs/DESIGN.md`.
 
 - **Entry point:** `EmailQBitProducer implements QBitMetaDataProducer<EmailQBitConfig>`, package `com.kingsrook.qbits.email`.
 - `metadata`: seven tables, enum sources, relations and provider/suppression validation.
-- `outbox`: EmailService, requests/results and the replaceable ad-hoc renderer.
+- `outbox`: EmailService, queue-time template rendering, protected resend and branded ad-hoc rendering.
 - `delivery`: durable dispatcher, attempt leases, rate limits, health and optional alerts.
 - `transport`: shared MIME, SMTP/SES transports, settings and registry.
 - `bridge`: QBIT_EMAIL adapter for core SendMessageAction.
 - `processes`: Review/Result record actions, backend send API and scheduled jobs.
 - `permissions`, `app`, `support`: custom permission checker, app/navigation and authorized database operations.
 - `EmailRuntime` resolves config from the current instance; `EmailIntegrations` declares ESB, API and Quick Search tables.
-- Templates/branding/PHI/full home rendering are part 2; their tables exist now.
+- `template`: parsed variable language/schema, locale resolution, immutable versions, version-bound PHI approval, MJML compilation, lazy secure-message built-in and inline preview.
+- `render`: CommonMark extensions, table-based light/dark layout, contrast validation, text conversion and unsubscribe-link signing (handler is phase c).
+- `phi`: RC.5 classification/token stand-ins and AES-GCM encryption; only dispatch decrypts bodies.
+- `app/EmailHome`: viewer-scoped counts and inline cards, with standard hourly/suppression chart widgets.
+- Version operations serialize on the template row; active/approved version selectors are parent-scoped.
+- Preview UI API endpoint awaits RC.6; webhook/unsubscribe handlers remain phase c.
 
 ## Invariants
 

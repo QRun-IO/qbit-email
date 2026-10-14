@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- Phase (a), part 2: versioned Markdown/HTML/MJML templates, typed variable schemas, escaped blocks/loops/fallbacks, branded light/dark layout and contrast validation.
+- New Version, Activate Version and version-bound Approve For PHI actions, edit permissions, immutable history and parent-scoped version selectors.
+- Sender-scoped record variables, classification stand-in, HMAC snapshot tokens, AES-GCM bodies, encrypted query displays and protected resend.
+- Lazy secure-message built-in, typed templated core bridge, process JSON variables, inline preview and viewer-scoped dashboard charts/cards.
+- PHI canary egress, masking, lifecycle, parent-filter, rendering, branding and GreenMail template tests.
+
 - Phase (b) Postmark, SendGrid and Mailgun HTTP transports with fixed HTTPS endpoints, bounded requests, tracking options, safe error classification and Retry-After support; no new dependencies or filesystem storage.
 - Strict Gmail SMTP credential/STARTTLS validation, provider-specific credential and webhook environment defaults, and the [provider setup guide](docs/PROVIDERS.md).
 - HTTP request-contract tests and local-server end-to-end outbox tests covering success, provider failures, permanent rejection, retries and secret-safe stored errors.
