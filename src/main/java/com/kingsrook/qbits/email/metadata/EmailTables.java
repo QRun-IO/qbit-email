@@ -96,6 +96,14 @@ public final class EmailTables
       result.add(QPossibleValueSource.newForEnum("email_suppression_reason", EmailEnums.SuppressionReason.values()));
       result.add(QPossibleValueSource.newForEnum("email_category", EmailCategory.values()));
       ALL.forEach(name -> result.add(QPossibleValueSource.newForTable(name)));
+      for(QPossibleValueSource source : result)
+      {
+         if(List.of(PROVIDER, MESSAGE, VERSION).contains(source.getName()))
+         {
+            source.withSearchFields(PROVIDER.equals(source.getName()) ? List.of("label", "name") : MESSAGE.equals(source.getName()) ? List.of("subject") : List.of("versionNumber", "locale"))
+               .withOrderByField("id");
+         }
+      }
       return (result);
    }
 
@@ -189,7 +197,7 @@ public final class EmailTables
          .withField(field("lastFailureMessage", QFieldType.STRING).withMaxLength(500))
          .withField(field("dispatchLock", QFieldType.INTEGER).withDefaultValue(0).withIsHidden(true).withIsEditable(false))
          .withField(field("defaultSlot", QFieldType.INTEGER).withIsHidden(true).withIsEditable(false));
-      table.withRecordLabelFormatAndFields("%s", "name");
+      table.withRecordLabelFormat(null).withRecordLabelFields(List.of());
       table.withUniqueKey(new UniqueKey("name"));
       table.withUniqueKey(new UniqueKey("defaultSlot"));
       table.withSection(SectionFactory.defaultT1("id", "name", "label", "kind", "enabled", "isDefault"));
@@ -244,6 +252,8 @@ public final class EmailTables
          .withField(field("senderProcess", QFieldType.STRING).withMaxLength(500))
          .withField(field("suppressedAddresses", QFieldType.TEXT).withIsSensitive(true))
          .withField(field("sendAfter", QFieldType.DATE_TIME));
+      table.withRecordLabelFormat(null).withRecordLabelFields(List.of());
+      table.getField("subject").setIsHeavy(false);
       table.withUniqueKey(new UniqueKey("idempotencyKey"));
       table.withSection(SectionFactory.defaultT1("id", "status", "toAddresses", "ccAddresses", "bccAddresses", "fromAddress"));
       table.withSection(SectionFactory.defaultT2("replyTo", "subject", "templateId", "templateVersionId", "brandId", "category", "locale", "variablesSnapshot", "htmlBody", "textBody", "phiApproved", "unsubscribeUrl", "bodySha256", "idempotencyKey", "providerId", "providerMessageId", "attemptCount", "nextAttemptDate", "leaseExpiresDate", "lastError", "finishedDate", "sentDate", "deliveredDate", "bouncedDate", "complainedDate", "deadLetterDate", "linkedTableName", "linkedRecordId", "senderQbit", "senderProcess", "suppressedAddresses", "sendAfter"));
@@ -326,6 +336,7 @@ public final class EmailTables
          .withField(field("sampleVariables", QFieldType.TEXT))
          .withField(field("createdBy", QFieldType.STRING).withMaxLength(500))
          .withField(field("activatedDate", QFieldType.DATE_TIME));
+      table.withRecordLabelFormat(null).withRecordLabelFields(List.of());
       table.withUniqueKey(new UniqueKey("templateId", "versionNumber", "locale"));
       table.withSection(SectionFactory.customT2("preview", new QIcon("preview")).withLabel("Preview").withWidgetName("emailTemplatePreview"));
       table.withSection(SectionFactory.defaultT1("id", "templateId", "versionNumber", "status", "locale", "subject"));
