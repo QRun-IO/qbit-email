@@ -39,6 +39,22 @@ The scheduler must already exist. Without a scheduler, callers can enqueue and r
 Configuration is looked up from the current `QInstance` on every call, never cached
 in a static variable.
 
+## Starter defaults and setup
+
+Include order: the DDL first, then the starter defaults from the host's master changelog (the qbit itself never runs DDL):
+
+```yaml
+- include: { file: db/liquibase/qbit-email/email-defaults.changelog.sql }
+```
+
+They are insert-only, hold no secrets, skip a host without the tables, and never change how mail looks on deploy. They add one brand, `neutral` (white background, near-black text, blue buttons, light and dark schemes, every pair at least 4.5:1 contrast), and only when the host has no brand at all. It is not the default brand: copy it for your own, or tick Default Brand on it.
+
+Everything else starts empty on purpose, and each table's help says why: a **provider** is your own connection (a server and the NAMES of its secret variables), so nothing can be sent until you add one; messages, attempts, events, the webhook inbox and suppressions are runtime data; the secure-message template is created by the qbit on first use and when the Email home opens, and other qbits register theirs with `EmailApi.ensureTemplate`.
+
+Every table has help that says what it is for and **how its rows get created**, shown on the table screen and when it is empty (`help/qbit-email.yaml`). Email admins also get a **Setup** card first on the home: provider, sender addresses, brands, templates, marketing readiness, delivery tracking, suppression list and scheduler, each with its state and the next step. It uses the same provider and brand resolution as the sender and `EmailApi.readiness`.
+
+A template's **Owner Qbit** (the qbit that registered it) is now used: messages sent from the template name that qbit as their sender unless the request names one.
+
 ## Tables and permissions
 
 | Table | Navigation | Writes |

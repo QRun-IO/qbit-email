@@ -134,6 +134,13 @@
          <version>${h2.version}</version>
          <scope>test</scope>
       </dependency>
+      <!-- EmailDefaultsChangelogTest runs the shipped seed changelog through real Liquibase on H2. -->
+      <dependency>
+         <groupId>org.liquibase</groupId>
+         <artifactId>liquibase-core</artifactId>
+         <version>4.33.0</version>
+         <scope>test</scope>
+      </dependency>
       <dependency>
          <groupId>org.junit.jupiter</groupId>
          <artifactId>junit-jupiter</artifactId>

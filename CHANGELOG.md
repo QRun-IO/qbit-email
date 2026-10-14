@@ -9,6 +9,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Built on QQQ 4.1.0-RC.7 (default QQQ profile).
 
 ### Added
+- Starter defaults changelog `db/liquibase/qbit-email/email-defaults.changelog.sql` (insert-only, guarded): one non-default, high-contrast `neutral` brand, only when no brand exists. Tested through real Liquibase on H2, including that it never changes rendering.
+- Help for the Email app and every `email_*` table (`help/qbit-email.yaml`, STAND-IN core#1198): what the table is for and how its rows get created, shown when it is empty.
+- A Setup card first on the Email home (email admins), using the sender's own provider and brand resolution and `EmailApi.readiness`. Opening the home also creates the built-in secure-message template.
+- `EmailTablesGuardrailTest`: every table is used by runtime code, seeded or listed as starting empty with a reason, and has help.
+
+### Fixed
+- `email_template.ownerQbit` was stored but never read, and the built-in template did not set it. The built-in now names `qbit-email`, the field is read-only with help, and messages sent from a template name its owner qbit as `senderQbit` unless the request names one.
+
+### Added
 - `EmailJobEffectTarget` automatically registers the durable-jobs `email` target, with idempotent outbox handoff, refusal reasons, reconciliation and job-owner session enforcement; H2 integration coverage and payload/registration documentation.
 - `EmailApiReadiness.failedChecks()` and `failed(check)` with `EmailApiReadinessCheck` (NOT_INSTALLED, PROVIDER_MISSING, PROVIDER_INVALID, PHI_PROVIDER, PUBLIC_BASE_URL, UNSUBSCRIBE_KEY, BRAND_POSTAL_ADDRESS, BODY_KEY), so callers react to a specific prerequisite without parsing reason text.
 - `EmailApi.sendOnce` as the public durable-effect handoff, with API-only outcome/result types, committed enqueue/replay semantics and suppression/transaction refusal parity. Exact idempotency-key and RFC Message-ID lookups return `EmailApiMessage`, which now includes `rfcMessageId` across all lookup routes. Public requests support ordinary caller transactions; `EmailEffects`, `EmailEffectOutcome` and `EmailMessageRef` are deprecated internals. H2 parity, reconciliation, storage-failure and API-boundary coverage; no new dependencies.

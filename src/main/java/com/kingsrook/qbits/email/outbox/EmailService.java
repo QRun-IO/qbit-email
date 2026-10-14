@@ -270,6 +270,14 @@ public final class EmailService
       if(templateContent != null)
       {
          row.getValues().putAll(templateContent.getValues());
+         if(row.getValue("senderQbit") == null && row.getValue("templateId") != null)
+         {
+            ///////////////////////////////////////////////////////////////////////////////
+            // the qbit that registered the template is the sender when none was named //
+            ///////////////////////////////////////////////////////////////////////////////
+            List<QRecord> owner = SystemWrites.query(EmailTables.TEMPLATE, EmailStore.equal("id", row.getValue("templateId")), queryTransaction);
+            row.setValue("senderQbit", owner.isEmpty() ? null : owner.getFirst().getValueString("ownerQbit"));
+         }
       }
       for(var field : config.getSecurityFields())
       {
