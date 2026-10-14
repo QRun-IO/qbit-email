@@ -30,6 +30,7 @@ import java.time.Duration;
 public class EmailTransportException extends Exception
 {
    private boolean permanent;
+   private boolean providerLevel;
    private Duration retryAfter;
 
    /*******************************************************************************
@@ -47,7 +48,24 @@ public class EmailTransportException extends Exception
     *******************************************************************************/
    public boolean getPermanent()
    {
-      return (permanent);
+      return (permanent && !providerLevel);
+   }
+
+   /*******************************************************************************
+    ** Provider failures are retryable without consuming the message retry budget.
+    *******************************************************************************/
+   public boolean getProviderLevel()
+   {
+      return (providerLevel);
+   }
+
+   /*******************************************************************************
+    ** Classify a failure affecting the provider rather than this message.
+    *******************************************************************************/
+   public EmailTransportException withProviderLevel(boolean providerLevel)
+   {
+      this.providerLevel = providerLevel;
+      return (this);
    }
 
 

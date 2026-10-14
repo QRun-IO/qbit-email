@@ -45,6 +45,7 @@ public class EmailQBitConfig implements QBitConfig
    private String defaultProviderName;
    private String bridgeProviderName = "qbitEmail";
    private Function<String, String> secretResolver = System::getenv;
+   private boolean allowPlaintextSmtpAuth = false;
    private Set<String> allowedEnvNames = Set.of();
    private Integer dispatchIntervalSeconds = 15;
    private Integer batchSize = 100;
@@ -60,6 +61,23 @@ public class EmailQBitConfig implements QBitConfig
    private MetaDataCustomizerInterface<QTableMetaData> tableMetaDataCustomizer;
 
    public static final Pattern ENV_NAME = Pattern.compile("^[A-Z_][A-Z0-9_]{0,99}$");
+
+   /*******************************************************************************
+    ** Whether the host explicitly permits SMTP credentials without TLS.
+    *******************************************************************************/
+   public boolean getAllowPlaintextSmtpAuth()
+   {
+      return (allowPlaintextSmtpAuth);
+   }
+
+   /*******************************************************************************
+    ** Opt in to plaintext SMTP authentication outside loopback.
+    *******************************************************************************/
+   public EmailQBitConfig withAllowPlaintextSmtpAuth(boolean allowPlaintextSmtpAuth)
+   {
+      this.allowPlaintextSmtpAuth = allowPlaintextSmtpAuth;
+      return (this);
+   }
 
    /*******************************************************************************
     ** Validate against the host instance.

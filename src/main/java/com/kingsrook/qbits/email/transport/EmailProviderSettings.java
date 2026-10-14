@@ -75,6 +75,18 @@ public final class EmailProviderSettings
    }
 
    /*******************************************************************************
+    ** Shared validation and send-time guard, without resolving credentials or DNS.
+    *******************************************************************************/
+   public boolean allowsSmtpAuth()
+   {
+      boolean credentials = value("usernameEnvName") != null || value("secretEnvName") != null;
+      String security = value("security") == null ? security() : value("security");
+      return (!credentials || "STARTTLS".equals(security) || "TLS".equals(security)
+         || config.getAllowPlaintextSmtpAuth() || "localhost".equalsIgnoreCase(host())
+         || "127.0.0.1".equals(host()) || "::1".equals(host()));
+   }
+
+   /*******************************************************************************
     ** Resolve an explicitly named secret immediately before sending.
     *******************************************************************************/
    String resolve(String field) throws EmailTransportException
@@ -86,7 +98,7 @@ public final class EmailProviderSettings
       }
       if(!EmailQBitConfig.ENV_NAME.matcher(name).matches() || !config.effectiveAllowedEnvNames(value("kind")).contains(name))
       {
-         throw (new EmailTransportException("Credential environment name is not allowed", true));
+         throw (new EmailTransportException("Credential environment name is not allowed", false).withProviderLevel(true));
       }
       try
       {
@@ -100,6 +112,6 @@ public final class EmailProviderSettings
       {
          // Resolver exception text may contain a secret.
       }
-      throw (new EmailTransportException("Credential environment variable is not set", true));
+      throw (new EmailTransportException("Credential environment variable is not set", false).withProviderLevel(true));
    }
 }

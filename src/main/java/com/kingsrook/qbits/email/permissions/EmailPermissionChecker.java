@@ -123,6 +123,6 @@ public class EmailPermissionChecker implements CustomPermissionChecker
       {
          return (true);
       }
-      return (session.hasPermission(permission) || (EmailPermissions.VIEW.equals(permission) && session.hasPermission(EmailPermissions.SEND)));
+      return (session.hasPermission(permission));
    }
 }

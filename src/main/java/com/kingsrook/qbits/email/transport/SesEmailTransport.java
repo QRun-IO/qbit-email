@@ -22,15 +22,19 @@ package com.kingsrook.qbits.email.transport;
 
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
+import jakarta.mail.MessagingException;
 import jakarta.mail.Session;
 import jakarta.mail.internet.AddressException;
 import jakarta.mail.internet.InternetAddress;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.regions.Region;
@@ -38,6 +42,7 @@ import software.amazon.awssdk.services.sesv2.SesV2Client;
 import software.amazon.awssdk.services.sesv2.SesV2ClientBuilder;
 import software.amazon.awssdk.services.sesv2.model.Destination;
 import software.amazon.awssdk.services.sesv2.model.EmailContent;
+import software.amazon.awssdk.services.sesv2.model.MessageRejectedException;
 import software.amazon.awssdk.services.sesv2.model.RawMessage;
 import software.amazon.awssdk.services.sesv2.model.SendEmailRequest;
 import software.amazon.awssdk.services.sesv2.model.SesV2Exception;
@@ -72,7 +77,17 @@ public class SesEmailTransport implements EmailTransport
    @Override
    public EmailTransportResult send(EmailEnvelope envelope, EmailProviderSettings settings) throws EmailTransportException
    {
+      ByteArrayOutputStream bytes = new ByteArrayOutputStream();
       try
+      {
+         EmailMime.build(Session.getInstance(new Properties()), envelope).writeTo(bytes, new String[] {"Bcc"});
+      }
+      catch(MessagingException | IOException | RuntimeException e)
+      {
+         throw (new EmailTransportException("Invalid email message", true));
+      }
+      AtomicBoolean credentialsFailed = new AtomicBoolean();
+      try(DefaultCredentialsProvider defaultCredentials = DefaultCredentialsProvider.builder().build())
       {
          SesV2ClientBuilder builder = SesV2Client.builder().region(Region.of(settings.value("region")))
             .overrideConfiguration(c -> c.apiCallTimeout(Duration.ofSeconds(40)).apiCallAttemptTimeout(Duration.ofSeconds(35))
@@ -81,8 +96,21 @@ public class SesEmailTransport implements EmailTransport
          {
             builder.credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(settings.resolve("usernameEnvName"), settings.resolve("secretEnvName"))));
          }
-         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-         EmailMime.build(Session.getInstance(new Properties()), envelope).writeTo(bytes, new String[] {"Bcc"});
+         else
+         {
+            builder.credentialsProvider(() ->
+            {
+               try
+               {
+                  return (defaultCredentials.resolveCredentials());
+               }
+               catch(RuntimeException e)
+               {
+                  credentialsFailed.set(true);
+                  throw (e);
+               }
+            });
+         }
          SendEmailRequest request = SendEmailRequest.builder()
             .fromEmailAddress(envelope.getFrom())
             .destination(Destination.builder().toAddresses(destinations(envelope.getTo())).ccAddresses(destinations(envelope.getCc())).bccAddresses(destinations(envelope.getBcc())).build())
@@ -99,12 +127,20 @@ public class SesEmailTransport implements EmailTransport
       }
       catch(SesV2Exception e)
       {
-         boolean permanent = e.statusCode() >= 400 && e.statusCode() < 500 && e.statusCode() != 429 && !e.isThrottlingException();
-         throw (new EmailTransportException(permanent ? "SES rejected the message" : "SES temporarily unavailable", permanent));
+         String code = e.awsErrorDetails() == null ? null : e.awsErrorDetails().errorCode();
+         boolean clientFailure = e.statusCode() >= 400 && e.statusCode() < 500 && e.statusCode() != 429 && !e.isThrottlingException();
+         boolean permanent = clientFailure && e.statusCode() != 401 && e.statusCode() != 403
+            && (e instanceof MessageRejectedException || "MessageRejected".equals(code) || "InvalidParameterValue".equals(code));
+         throw (new EmailTransportException(permanent ? "SES rejected the message" : "SES temporarily unavailable", permanent)
+            .withProviderLevel(clientFailure && !permanent));
+      }
+      catch(AddressException e)
+      {
+         throw (new EmailTransportException("Invalid email message", true));
       }
       catch(Exception e)
       {
-         throw (new EmailTransportException("SES temporarily unavailable", false));
+         throw (new EmailTransportException("SES temporarily unavailable", false).withProviderLevel(credentialsFailed.get()));
       }
    }
 

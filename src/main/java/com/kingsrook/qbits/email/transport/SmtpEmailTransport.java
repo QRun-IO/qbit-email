@@ -44,6 +44,10 @@ public class SmtpEmailTransport implements EmailTransport
    @Override
    public EmailTransportResult send(EmailEnvelope envelope, EmailProviderSettings settings) throws EmailTransportException
    {
+      if(!settings.allowsSmtpAuth())
+      {
+         throw (new EmailTransportException("SMTP sign-in needs STARTTLS or TLS", false).withProviderLevel(true));
+      }
       Properties properties = new Properties();
       properties.setProperty("mail.smtp.connectiontimeout", "10000");
       properties.setProperty("mail.smtp.timeout", "15000");
@@ -54,9 +58,17 @@ public class SmtpEmailTransport implements EmailTransport
       properties.setProperty("mail.smtp.ssl.enable", String.valueOf("TLS".equals(settings.security())));
       properties.setProperty("mail.smtp.ssl.checkserveridentity", "true");
       Session session = Session.getInstance(properties);
+      MimeMessage message;
+      try
+      {
+         message = EmailMime.build(session, envelope);
+      }
+      catch(MessagingException | RuntimeException e)
+      {
+         throw (new EmailTransportException("Invalid email message", true));
+      }
       try(Transport transport = session.getTransport("smtp"))
       {
-         MimeMessage message = EmailMime.build(session, envelope);
          String username = settings.resolve("usernameEnvName");
          String password = username == null ? null : settings.resolve("secretEnvName");
          transport.connect(settings.host(), settings.port(), username, password);
@@ -66,7 +78,7 @@ public class SmtpEmailTransport implements EmailTransport
       catch(MessagingException e)
       {
          boolean permanent = permanent(e);
-         throw (new EmailTransportException(permanent ? "SMTP rejected the message" : "SMTP temporarily unavailable", permanent));
+         throw (new EmailTransportException(permanent ? "SMTP rejected the message" : "SMTP temporarily unavailable", permanent).withProviderLevel(providerLevel(e)));
       }
    }
 
@@ -75,6 +87,10 @@ public class SmtpEmailTransport implements EmailTransport
     *******************************************************************************/
    static boolean permanent(Throwable error)
    {
+      if(providerLevel(error))
+      {
+         return (false);
+      }
       Set<Throwable> seen = new HashSet<>();
       while(error != null && seen.add(error))
       {
@@ -86,10 +102,24 @@ public class SmtpEmailTransport implements EmailTransport
          {
             return (true);
          }
-         if(error instanceof AuthenticationFailedException)
+         error = error instanceof MessagingException messaging && messaging.getNextException() != null ? messaging.getNextException() : error.getCause();
+      }
+      return (false);
+   }
+
+   /*******************************************************************************
+    ** Authentication failures affect every message, including temporary refusals.
+    *******************************************************************************/
+   static boolean providerLevel(Throwable error)
+   {
+      Set<Throwable> seen = new HashSet<>();
+      while(error != null && seen.add(error))
+      {
+         if(error instanceof AuthenticationFailedException
+            || error instanceof SMTPSendFailedException send && (send.getReturnCode() == 530 || send.getReturnCode() == 535)
+            || error instanceof SMTPAddressFailedException address && (address.getReturnCode() == 530 || address.getReturnCode() == 535))
          {
-            // Authentication can also fail temporarily (for example SMTP 454).
-            return (error.getMessage() == null || !error.getMessage().matches("(?s)^4[0-9]{2}[ -].*"));
+            return (true);
          }
          error = error instanceof MessagingException messaging && messaging.getNextException() != null ? messaging.getNextException() : error.getCause();
       }

@@ -35,13 +35,21 @@ import com.kingsrook.qbits.email.support.*;
 import com.kingsrook.qbits.email.transport.*;
 import com.kingsrook.qqq.backend.core.actions.QBackendTransaction;
 import com.kingsrook.qqq.backend.core.actions.messaging.SendMessageAction;
+import com.kingsrook.qqq.backend.core.alerts.AlertResolution;
+import com.kingsrook.qqq.backend.core.alerts.AlertSignal;
+import com.kingsrook.qqq.backend.core.alerts.AlertSinkInterface;
+import com.kingsrook.qqq.backend.core.alerts.AlertsInstanceMetaData;
 import com.kingsrook.qqq.backend.core.context.QContext;
+import com.kingsrook.qqq.backend.core.exceptions.QException;
 import com.kingsrook.qqq.backend.core.model.actions.messaging.*;
 import com.kingsrook.qqq.backend.core.model.actions.messaging.email.*;
 import com.kingsrook.qqq.backend.core.model.actions.tables.insert.InsertInput;
 import com.kingsrook.qqq.backend.core.model.data.QRecord;
+import com.kingsrook.qqq.backend.core.model.metadata.code.QCodeReference;
 import jakarta.mail.Multipart;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import static org.assertj.core.api.Assertions.*;
 
 /*******************************************************************************
@@ -106,6 +114,261 @@ class EmailDeliveryTest
    EmailDispatcher fake(EmailTransport transport)
    {
       return (new EmailDispatcher(new EmailTransportRegistry().withTransport("SMTP", transport)));
+   }
+
+   /*******************************************************************************
+    ** Missing credentials and SMTP 535 pause a provider until credentials recover.
+    *******************************************************************************/
+   @ParameterizedTest
+   @ValueSource(booleans = {false, true})
+   void providerCredentialsRecoverWithoutExhaustingMessageBudget(boolean refused) throws Exception
+   {
+      mail.setUser("person@example.com", "login", "password");
+      EmailRuntime.config().withMaxAttempts(1).withSecretResolver(name -> refused ? "wrong" : null);
+      SystemWrites.updateOne(EmailTables.PROVIDER, new QRecord().withValue("id", 1)
+         .withValue("usernameEnvName", "EMAIL_SMTP_USERNAME").withValue("secretEnvName", "EMAIL_SMTP_PASSWORD"));
+      var first = EmailService.send(request());
+      var second = EmailService.send(request());
+      var dispatcher = new EmailDispatcher();
+      for(int i = 0; i < 2; i++)
+      {
+         EmailRuntime.setClock(Clock.fixed(now.plusSeconds(i * 301L), ZoneOffset.UTC));
+         assertThat(dispatcher.runOnce()).isEqualTo(new EmailDispatcher.RunSummary(0, 1, 1));
+         assertThat(message(first.messageId()).getValueString("status")).isEqualTo("RETRY_WAIT");
+         assertThat(message(first.messageId()).getValueInteger("attemptCount")).isEqualTo(i + 1);
+         assertThat(message(first.messageId()).getValueInstant("nextAttemptDate"))
+            .isEqualTo(now.plusSeconds(i * 301L + (i == 0 ? 60 : 300)));
+         assertThat(message(second.messageId()).getValueInteger("attemptCount")).isZero();
+         var provider = H2Support.all(EmailTables.PROVIDER).getFirst();
+         assertThat(provider.getValueString("healthStatus")).isEqualTo("UNHEALTHY");
+         assertThat(provider.getValueString("lastFailureMessage")).isEqualTo("Credentials missing or refused");
+      }
+      EmailRuntime.config().withSecretResolver(name -> name.endsWith("USERNAME") ? "login" : "password");
+      EmailRuntime.setClock(Clock.fixed(now.plusSeconds(602), ZoneOffset.UTC));
+      assertThat(dispatcher.runOnce().sent()).isEqualTo(2);
+      assertThat(message(first.messageId()).getValueString("status")).isEqualTo("SENT");
+      assertThat(H2Support.all(EmailTables.PROVIDER).getFirst().getValueString("healthStatus")).isEqualTo("HEALTHY");
+      assertThat(H2Support.all(EmailTables.ATTEMPT)).extracting(row -> row.getValueString("outcome"))
+         .containsExactly("PROVIDER_FAILURE", "PROVIDER_FAILURE", "SUCCEEDED", "SUCCEEDED");
+   }
+
+   /*******************************************************************************
+    ** Ordinary transient failures still have their full budget after provider repair.
+    *******************************************************************************/
+   @Test
+   void providerFailuresDoNotConsumeLaterTransientBudget() throws Exception
+   {
+      EmailRuntime.config().withMaxAttempts(2);
+      var queued = EmailService.send(request());
+      var broken = fake((e, settings) ->
+      {
+         throw new EmailTransportException("credentials", false).withProviderLevel(true);
+      });
+      for(int i = 0; i < 3; i++)
+      {
+         EmailRuntime.setClock(Clock.fixed(now.plusSeconds(i * 901L), ZoneOffset.UTC));
+         assertThat(broken.sendNow(queued.messageId())).isEqualTo(EmailDispatcher.SendResult.RETRY_WAIT);
+      }
+      var temporary = fake((e, settings) ->
+      {
+         throw new EmailTransportException("temporary", false);
+      });
+      EmailRuntime.setClock(Clock.fixed(now.plusSeconds(2703), ZoneOffset.UTC));
+      assertThat(temporary.sendNow(queued.messageId())).isEqualTo(EmailDispatcher.SendResult.RETRY_WAIT);
+      EmailRuntime.setClock(Clock.fixed(now.plusSeconds(3004), ZoneOffset.UTC));
+      assertThat(temporary.sendNow(queued.messageId())).isEqualTo(EmailDispatcher.SendResult.DEAD_LETTER);
+      assertThat(message(queued.messageId()).getValueInteger("attemptCount")).isEqualTo(5);
+   }
+
+   /*******************************************************************************
+    ** Both lease recovery paths exclude earlier provider failures from the budget.
+    *******************************************************************************/
+   @ParameterizedTest
+   @ValueSource(booleans = {false, true})
+   void leaseRecoveryExcludesProviderFailures(boolean maintenance) throws Exception
+   {
+      EmailRuntime.config().withMaxAttempts(2);
+      var queued = EmailService.send(request());
+      for(int i = 0; i < 2; i++)
+      {
+         EmailRuntime.setClock(Clock.fixed(now.plusSeconds(i * 301L), ZoneOffset.UTC));
+         assertThat(fake((e, settings) ->
+         {
+            throw new EmailTransportException("credentials", false).withProviderLevel(true);
+         }).sendNow(queued.messageId())).isEqualTo(EmailDispatcher.SendResult.RETRY_WAIT);
+      }
+      EmailRuntime.setClock(Clock.fixed(now.plusSeconds(602), ZoneOffset.UTC));
+      var slow = fake((e, settings) ->
+      {
+         EmailRuntime.setClock(Clock.fixed(now.plusSeconds(903), ZoneOffset.UTC));
+         var recovery = fake((envelope, provider) -> new EmailTransportResult("recovered"));
+         try
+         {
+            assertThat((maintenance ? recovery.maintain() : recovery.runOnce()).sent()).isEqualTo(1);
+         }
+         catch(Exception ex)
+         {
+            throw new RuntimeException(ex);
+         }
+         return (new EmailTransportResult("late"));
+      });
+      assertThat(slow.sendNow(queued.messageId())).isEqualTo(EmailDispatcher.SendResult.NOT_SENT);
+      assertThat(message(queued.messageId()).getValueString("providerMessageId")).isEqualTo("recovered");
+      assertThat(H2Support.all(EmailTables.ATTEMPT)).extracting(row -> row.getValueString("outcome"))
+         .containsExactly("PROVIDER_FAILURE", "PROVIDER_FAILURE", "LEASE_EXPIRED", "SUCCEEDED");
+   }
+
+   /*******************************************************************************
+    ** Even a slow tick stops the failed provider while processing another provider.
+    *******************************************************************************/
+   @Test
+   void providerFailureStopsTheTickAfterProbeWindowPasses() throws Exception
+   {
+      EmailService.send(request());
+      EmailService.send(request());
+      H2Support.insert(EmailTables.PROVIDER, new QRecord().withValue("name", "other").withValue("kind", "SMTP")
+         .withValue("host", "localhost").withValue("port", 25).withValue("fromAddress", "sender@example.com")
+         .withValue("enabled", true).withValue("isDefault", false));
+      var other = EmailService.send(request().withProviderName("other"));
+      AtomicInteger calls = new AtomicInteger();
+      var dispatcher = new EmailDispatcher(new EmailTransportRegistry().withTransport("SMTP", (e, settings) ->
+      {
+         calls.incrementAndGet();
+         if("relay".equals(settings.value("name")))
+         {
+            throw new EmailTransportException("credentials", false).withProviderLevel(true);
+         }
+         return (new EmailTransportResult("ok"));
+      }))
+      {
+         /*******************************************************************************
+          ** Advance time only after the failed attempt has committed.
+          *******************************************************************************/
+         @Override
+         protected SendResult attempt(Integer id, boolean immediate) throws QException
+         {
+            SendResult result = super.attempt(id, immediate);
+            EmailRuntime.setClock(Clock.fixed(now.plusSeconds(601), ZoneOffset.UTC));
+            return (result);
+         }
+      };
+      assertThat(dispatcher.runOnce()).isEqualTo(new EmailDispatcher.RunSummary(1, 1, 1));
+      assertThat(calls.get()).isEqualTo(2);
+      assertThat(message(other.messageId()).getValueString("status")).isEqualTo("SENT");
+   }
+
+   /*******************************************************************************
+    ** Corrupt queued MIME is dead-lettered and does not prevent the next delivery.
+    *******************************************************************************/
+   @Test
+   void messageBuildFailureIsPermanent() throws Exception
+   {
+      var invalidAddress = EmailService.send(request());
+      var invalidSubject = EmailService.send(request());
+      var valid = EmailService.send(request());
+      SystemWrites.updateOne(EmailTables.MESSAGE, new QRecord().withValue("id", invalidAddress.messageId()).withValue("fromAddress", "broken <"));
+      SystemWrites.updateOne(EmailTables.MESSAGE, new QRecord().withValue("id", invalidSubject.messageId()).withValue("subject", "bad\r\nheader"));
+      assertThat(new EmailDispatcher().runOnce()).isEqualTo(new EmailDispatcher.RunSummary(1, 2, 0));
+      assertThat(message(invalidAddress.messageId()).getValueString("status")).isEqualTo("DEAD_LETTER");
+      assertThat(message(invalidSubject.messageId()).getValueString("status")).isEqualTo("DEAD_LETTER");
+      assertThat(message(valid.messageId()).getValueString("status")).isEqualTo("SENT");
+   }
+
+   /*******************************************************************************
+    ** A database or runtime failure on one message cannot abort a batch.
+    *******************************************************************************/
+   @Test
+   void isolatesCheckedAndRuntimeAttemptFailures() throws Exception
+   {
+      var checked = EmailService.send(request());
+      var unchecked = EmailService.send(request());
+      var valid = EmailService.send(request());
+      var dispatcher = new EmailDispatcher()
+      {
+         /*******************************************************************************
+          ** Inject failures at the same boundary as database claim/completion errors.
+          *******************************************************************************/
+         @Override
+         protected SendResult attempt(Integer id, boolean immediate) throws QException
+         {
+            if(id.equals(checked.messageId()))
+            {
+               throw new QException("test database failure");
+            }
+            if(id.equals(unchecked.messageId()))
+            {
+               throw new IllegalStateException("test runtime failure");
+            }
+            return (super.attempt(id, immediate));
+         }
+      };
+      assertThat(dispatcher.runOnce()).isEqualTo(new EmailDispatcher.RunSummary(1, 2, 0));
+      assertThat(message(valid.messageId()).getValueString("status")).isEqualTo("SENT");
+   }
+
+   /*******************************************************************************
+    ** Both unhealthy raises and recovery resolutions tolerate a throwing sink.
+    *******************************************************************************/
+   @Test
+   void failingAlertSinkCannotFailCommittedOutcomes() throws Exception
+   {
+      ThrowingAlertSink.raised = 0;
+      ThrowingAlertSink.resolved = 0;
+      AlertsInstanceMetaData.ofOrWithNew(QContext.getQInstance())
+         .withSink(new QCodeReference(ThrowingAlertSink.class));
+      var queued = EmailService.send(request());
+      assertThat(fake((e, settings) ->
+      {
+         throw new EmailTransportException("credentials", false).withProviderLevel(true);
+      }).sendNow(queued.messageId())).isEqualTo(EmailDispatcher.SendResult.RETRY_WAIT);
+      assertThat(ThrowingAlertSink.raised).isEqualTo(1);
+      EmailRuntime.setClock(Clock.fixed(now.plusSeconds(301), ZoneOffset.UTC));
+      assertThat(new EmailDispatcher().sendNow(queued.messageId())).isEqualTo(EmailDispatcher.SendResult.SENT);
+      assertThat(ThrowingAlertSink.resolved).isEqualTo(1);
+      assertThat(message(queued.messageId()).getValueString("status")).isEqualTo("SENT");
+      var rejected = EmailService.send(request());
+      assertThat(fake((e, settings) ->
+      {
+         throw new EmailTransportException("rejected", true);
+      }).sendNow(rejected.messageId())).isEqualTo(EmailDispatcher.SendResult.DEAD_LETTER);
+      assertThat(ThrowingAlertSink.raised).isEqualTo(2);
+   }
+
+   /*******************************************************************************
+    ** Loadable sink that records invocation before simulating an alert outage.
+    *******************************************************************************/
+   public static class ThrowingAlertSink implements AlertSinkInterface
+   {
+      static int raised;
+      static int resolved;
+
+      /*******************************************************************************
+       ** Simulate a failed alert raise.
+       *******************************************************************************/
+      @Override
+      public void raise(AlertSignal signal)
+      {
+         raised++;
+         throw new IllegalStateException("test alert outage");
+      }
+
+      /*******************************************************************************
+       ** Simulate a failed recovery resolution.
+       *******************************************************************************/
+      @Override
+      public void resolve(AlertResolution resolution)
+      {
+         resolved++;
+         throw new IllegalStateException("test alert outage");
+      }
+
+      /*******************************************************************************
+       ** Heartbeats are not used by email delivery.
+       *******************************************************************************/
+      @Override
+      public void heartbeat(String source, Instant timestamp)
+      {
+      }
    }
 
    /*******************************************************************************

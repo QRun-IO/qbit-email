@@ -286,11 +286,70 @@ class EmailMetadataTest
             .hasMessageContaining("email.send");
       QContext.getQSession().setPermissions(Set.of("email.send"));
       assertThat(EmailPermissionChecker.has("email.send")).isTrue();
-      assertThat(EmailPermissionChecker.has("email.view")).isTrue();
+      assertThat(EmailPermissionChecker.has("email.view")).isFalse();
+      instance.setEnforcePermissionsInCoreActions(true);
+      assertThatThrownBy(() -> new QueryAction().execute(new QueryInput(EmailTables.MESSAGE)))
+         .hasMessageContaining("email.view");
+      checker.checkPermissionsThrowing(new com.kingsrook.qqq.backend.core.model.actions.processes.RunProcessInput(),
+         instance.getProcess(EmailProcesses.SEND_TEMPLATED));
       assertThat(EmailPermissionChecker.has("email.admin")).isFalse();
       QContext.getQSession().setPermissions(Set.of("email.manage"));
       assertThat(EmailPermissionChecker.has("email.send")).isTrue();
+      assertThat(EmailPermissionChecker.has("email.view")).isTrue();
       assertThat(EmailProcesses.permissionFor(EmailProcesses.SEND_TEST)).isEqualTo("email.admin");
+   }
+
+   /*******************************************************************************
+    ** Credentialed SMTP needs encryption unless loopback or explicitly allowed.
+    *******************************************************************************/
+   @Test
+   void plaintextSmtpAuthenticationValidation()
+   {
+      var config = EmailRuntime.config();
+      assertThat(config.getAllowPlaintextSmtpAuth()).isFalse();
+      for(String kind : List.of("SMTP", "GMAIL_SMTP"))
+      {
+         for(String credential : List.of("usernameEnvName", "secretEnvName"))
+         {
+            var row = provider("auth").withValue("kind", kind).withValue("host", "relay.example.com")
+               .withValue("security", "NONE").withValue(credential, "EMAIL_SMTP_USERNAME");
+            assertThat(EmailTableCustomizers.validateProvider(row, config)).contains("SMTP sign-in needs STARTTLS or TLS");
+            for(String security : List.of("STARTTLS", "TLS"))
+            {
+               assertThat(EmailTableCustomizers.validateProvider(row.withValue("security", security), config)).isEmpty();
+            }
+            row.withValue("security", "NONE");
+            assertThat(EmailTableCustomizers.validateProvider(row, config.withAllowPlaintextSmtpAuth(true))).isEmpty();
+            config.withAllowPlaintextSmtpAuth(false);
+         }
+      }
+      for(String host : List.of("localhost", "LOCALHOST", "127.0.0.1", "::1"))
+      {
+         assertThat(EmailTableCustomizers.validateProvider(provider("local").withValue("host", host)
+            .withValue("security", "NONE").withValue("usernameEnvName", "EMAIL_SMTP_USERNAME"), config)).isEmpty();
+      }
+      assertThat(EmailTableCustomizers.validateProvider(provider("relay").withValue("host", "relay.example.com")
+         .withValue("security", "NONE"), config)).isEmpty();
+   }
+
+   /*******************************************************************************
+    ** Sender headers cannot inject new headers, including sparse UI updates.
+    *******************************************************************************/
+   @Test
+   void providerHeadersRefuseLineBreaks() throws Exception
+   {
+      var stored = insert(provider("headers"));
+      for(String field : List.of("fromName", "fromAddress", "replyTo"))
+      {
+         for(String newline : List.of("\r", "\n"))
+         {
+            var row = provider("bad").withValue(field, "sender@example.com" + newline + "Bcc: hidden@example.com");
+            assertThat(EmailTableCustomizers.validateProvider(row, EmailRuntime.config())).isNotEmpty();
+            var updated = new UpdateAction().execute(new UpdateInput(EmailTables.PROVIDER)
+               .withRecords(List.of(new QRecord().withValue("id", stored.getValue("id")).withValue(field, row.getValue(field)))));
+            assertThat(updated.getRecords().getFirst().getErrors()).isNotEmpty();
+         }
+      }
    }
 
    /*******************************************************************************
@@ -394,6 +453,10 @@ class EmailMetadataTest
             .isInstanceOf(com.kingsrook.qqq.backend.core.exceptions.QPermissionDeniedException.class);
       assertThat(SystemWrites.call(() -> EmailService.send(request)).status())
             .isEqualTo(EmailSendResult.Status.QUEUED);
+      QContext.getQSession().setPermissions(Set.of("email.send", "email.hasAccess"));
+      assertThat(EmailService.send(request).status()).isEqualTo(EmailSendResult.Status.QUEUED);
+      assertThatThrownBy(() -> new QueryAction().execute(new QueryInput(EmailTables.MESSAGE)))
+         .isInstanceOf(com.kingsrook.qqq.backend.core.exceptions.QPermissionDeniedException.class);
       assertThat(SystemWrites.active()).isFalse();
    }
 
