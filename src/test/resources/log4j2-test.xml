@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+   <Appenders>
+      <Console name="Console" target="SYSTEM_ERR">
+         <LevelMatchFilter level="OFF" onMatch="DENY" onMismatch="NEUTRAL"/>
+         <PatternLayout pattern="%level %logger{1}: %message%n"/>
+      </Console>
+   </Appenders>
+   <Loggers>
+      <Logger name="com.icegreen.greenmail" level="OFF"/>
+      <Root level="WARN"><AppenderRef ref="Console"/></Root>
+   </Loggers>
+</Configuration>

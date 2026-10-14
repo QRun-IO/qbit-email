@@ -27,6 +27,9 @@
       <maven.compiler.target>21</maven.compiler.target>
       <jacoco.version>0.8.15</jacoco.version>
       <h2.version>2.2.224</h2.version>
+      <commonmark.version>0.27.1</commonmark.version>
+      <awssdk.version>2.41.34</awssdk.version>
+      <greenmail.version>2.0.1</greenmail.version>
    </properties>
 
    <parent>
@@ -77,14 +80,46 @@
          <artifactId>qqq-backend-core</artifactId>
       </dependency>
 
+      <!-- Markdown templates (DESIGN 5.2). -->
+      <dependency>
+         <groupId>org.commonmark</groupId>
+         <artifactId>commonmark</artifactId>
+         <version>${commonmark.version}</version>
+      </dependency>
+      <dependency>
+         <groupId>org.commonmark</groupId>
+         <artifactId>commonmark-ext-gfm-tables</artifactId>
+         <version>${commonmark.version}</version>
+      </dependency>
+      <dependency>
+         <groupId>org.commonmark</groupId>
+         <artifactId>commonmark-ext-autolink</artifactId>
+         <version>${commonmark.version}</version>
+      </dependency>
+
+      <!-- SES transport (DESIGN 3.4): AWS SDK v2 sesv2. -->
+      <dependency>
+         <groupId>software.amazon.awssdk</groupId>
+         <artifactId>sesv2</artifactId>
+         <version>${awssdk.version}</version>
+      </dependency>
+
+      <!-- Webhook and unsubscribe routes (DESIGN 6, 8); the host app provides Javalin. -->
+      <dependency>
+         <groupId>com.kingsrook.qqq</groupId>
+         <artifactId>qqq-middleware-javalin</artifactId>
+         <scope>provided</scope>
+      </dependency>
+
       <dependency>
          <groupId>com.kingsrook.qqq</groupId>
          <artifactId>qqq-backend-module-rdbms</artifactId>
          <scope>test</scope>
       </dependency>
       <dependency>
-         <groupId>com.kingsrook.qqq</groupId>
-         <artifactId>qqq-middleware-javalin</artifactId>
+         <groupId>com.icegreen</groupId>
+         <artifactId>greenmail-junit5</artifactId>
+         <version>${greenmail.version}</version>
          <scope>test</scope>
       </dependency>
       <dependency>
@@ -195,7 +230,7 @@
             <activeByDefault>true</activeByDefault>
          </activation>
          <properties>
-            <qqq.snapshot.version>4.1.0-RC.4</qqq.snapshot.version>
+            <qqq.snapshot.version>4.1.0-RC.5</qqq.snapshot.version>
          </properties>
          <dependencyManagement>
             <dependencies>
