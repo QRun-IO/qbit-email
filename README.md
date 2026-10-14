@@ -13,7 +13,7 @@ qbit-object-storage is wired in.
 
 ## Install
 
-Requires Java 21, QQQ **4.1.0-RC.5**, and a transactional RDBMS with the supplied unique
+Requires Java 21, QQQ **4.1.0-RC.7**, and a transactional RDBMS with the supplied unique
 constraints. Apply [the PostgreSQL DDL](docs/ddl/email-postgres.sql) before producing the qbit. SQL timestamps store UTC values without a timezone, matching QQQ RC.5.
 The physical table names equal their metadata names; `backendName` selects the host's
 QQQ database backend, as it does in qbit-webhooks.
@@ -588,23 +588,29 @@ PHI canary egress, encryption, preview widgets and home data.
 
 ## Durable jobs
 
-`EmailEffects.send(request, effectIdempotencyKey)` hands a message to the committed
-email outbox exactly once per key and returns an `EmailEffects.Result` containing
-`EmailEffectOutcome` and an `EmailMessageRef`. `QUEUED_OR_DUPLICATE` means the outbox
-accepted responsibility; `REFUSED` means a definite refusal, including suppression.
-Use `findByIdempotencyKey` or `findByRfcMessageId` to reconcile a handoff. These are
-trusted system reads returning only references. Database failures propagate.
-Requests must not carry a caller transaction; the effect dispatcher calls after its
-own chunk commit. Existing `EmailService` transaction support is unchanged.
+Built on QQQ **4.1.0-RC.7**. Enable `DurableJobsMetaData` and define the jobs tables
+**before** producing the email qbit: `EmailQBitProducer` automatically registers
+`EmailJobEffectTarget` under target name `email`. If jobs are enabled later, call
+`EmailJobEffectTarget.register(instance)` afterward. Registration is a no-op when
+jobs are disabled.
 
-Each new message stores a unique `rfcMessageId` once. SMTP (including the Gmail preset),
-Postmark, SendGrid and Mailgun carry it on every attempt. SES receives it in the raw
-request but replaces it downstream; every transport retains `X-QQQ-Email-Id`.
-Message-ID enables correlation and receiver deduplication where supported; it does
-not promise exactly-once inbox delivery.
+Declare `new JobEffectDeclaration("welcomeEmail", "<step>", "email",
+JobEffectType.IDEMPOTENT_EXTERNAL)` in the process's `DurableProcessMetaData`, then
+call `JobEffects.emit(input, "welcomeEmail", rowKey, payload)` in the backend step.
+The payload accepts recipients, template or ad-hoc bodies, variables, routing and
+record linkage; see the [complete payload contract and examples](docs/DURABLE-JOBS.md).
 
-See [the handoff contract, provider references, schema upgrade and RC.7 binding sketch](docs/DURABLE-JOBS.md).
-The build remains on released QQQ **4.1.0-RC.5**, without durable-jobs dependencies.
+The target deduplicates handoffs by the effect key. SENT means the email outbox has
+committed, while its dispatcher owns provider delivery and retries. Job effects
+send under the job owner's current session and captured security scope; an owner
+whose session cannot be established produces FAILED. Other exceptions produce
+UNKNOWN and can safely be retried using the same key. Reconcile finds the existing
+outbox row, including terminal audit rows.
+
+Each message retains its stored RFC Message-ID across provider attempts. SMTP,
+Postmark, SendGrid and Mailgun carry it; SES replaces it downstream. This supports
+correlation and receiver deduplication where available, without guaranteeing
+exactly-once inbox delivery. See the [schema upgrade and provider notes](docs/DURABLE-JOBS.md).
 
 ## License
 

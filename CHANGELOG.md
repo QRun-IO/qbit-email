@@ -5,13 +5,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+- Built on QQQ 4.1.0-RC.7 (default QQQ profile).
+
 ### Added
+- `EmailJobEffectTarget` automatically registers the durable-jobs `email` target, with idempotent outbox handoff, refusal reasons, reconciliation and job-owner session enforcement; H2 integration coverage and payload/registration documentation.
 - `EmailApiReadiness.failedChecks()` and `failed(check)` with `EmailApiReadinessCheck` (NOT_INSTALLED, PROVIDER_MISSING, PROVIDER_INVALID, PHI_PROVIDER, PUBLIC_BASE_URL, UNSUBSCRIBE_KEY, BRAND_POSTAL_ADDRESS, BODY_KEY), so callers react to a specific prerequisite without parsing reason text.
 - `EmailApi.sendOnce` as the public durable-effect handoff, with API-only outcome/result types, committed enqueue/replay semantics and suppression/transaction refusal parity. Exact idempotency-key and RFC Message-ID lookups return `EmailApiMessage`, which now includes `rfcMessageId` across all lookup routes. Public requests support ordinary caller transactions; `EmailEffects`, `EmailEffectOutcome` and `EmailMessageRef` are deprecated internals. H2 parity, reconciliation, storage-failure and API-boundary coverage; no new dependencies.
 - Stable `com.kingsrook.qbits.email.api` contract for cross-qbit sends, create-once templates, metadata-only message lookups, enabled sender addresses, default provider selection and secret-safe readiness (including marketing and PHI prerequisites). JDK/QQQ-only signatures, complete request/status mapping tests and a reflection package-boundary guard; no new dependencies.
 - Documented both supported cross-qbit routes: core-only `SendMessageAction` via `qbitEmail`, and the public API for richer sends and lookups.
 - Persisted unique RFC Message-IDs, stable across delivery attempts, with SMTP/Gmail SMTP, SES raw MIME and Postmark/SendGrid/Mailgun request propagation (SES replaces the header downstream).
-- Core-independent `EmailEffects` handoff, reference lookups by idempotency key or RFC Message-ID, refusal mapping and an RC.7 binding design sketch; offline retry and provider-contract tests.
+- Core-independent `EmailEffects` handoff, reference lookups by idempotency key or RFC Message-ID and refusal mapping; offline retry and provider-contract tests.
 - Checkstyle now checks test sources as well as main sources; existing test imports and formatting corrected.
 - Provider sender addresses: child table `email_provider_sender_address` (validated lowercase address, display name, one default, enabled, note; unique per provider; domain bound to the provider's sending domain; admin-only), shown on the provider record. `EmailRequest.withFromAddressId`, `from_address_id` on messages, refusal of a from address that is not an enabled row of the resolved provider, and the provider `from_address` / `from_name` kept as the fallback.
 - Contingent possible-value filters on the new from-address pickers (send processes by `providerId`, Send Test Email by the acted-on provider, message `fromAddressId` by `providerId`) and on the attempt and event message pickers (by `providerId`) and the suppression source event (by `sourceMessageId`); the send processes also take `providerId`.
