@@ -4,7 +4,7 @@ layer: QBIT
 # Help for the Email app and every email_* table, in the QQQ help-bundle format
 # (qqq#1198). Each table entry says what the table is for and how its rows get
 # created, so an empty table explains itself. EmailHelp applies it until the core
-# HelpBundles registry ships in a QQQ release (STAND-IN(core=#1198)).
+# HelpBundles registry ships in a QQQ release (a stand-in until core #1198 ships).
 # Summaries stay under 120 characters (EmailTablesGuardrailTest).
 entries:
   - key: app:email;slot:help
