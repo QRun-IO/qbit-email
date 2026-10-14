@@ -234,9 +234,16 @@ public final class EmailTableCustomizers
       {
          for(QRecord row : records)
          {
-            if(!SystemWrites.query(EmailTables.MESSAGE, com.kingsrook.qbits.email.support.EmailStore.equal("providerId", row.getValueInteger("id")).withLimit(1), input.getTransaction()).isEmpty())
+            //////////////////////////////////////////////////////////////////
+            // the same history the RESTRICT foreign keys protect (docs/ddl) //
+            //////////////////////////////////////////////////////////////////
+            for(String history : List.of(EmailTables.MESSAGE, EmailTables.ATTEMPT, EmailTables.EVENT, EmailTables.INBOX))
             {
-               row.addError(new BadInputStatusMessage("Providers with message history cannot be deleted; disable the provider instead"));
+               if(!SystemWrites.query(history, EmailStore.equal("providerId", row.getValueInteger("id")).withLimit(1), input.getTransaction()).isEmpty())
+               {
+                  row.addError(new BadInputStatusMessage("Providers with message history cannot be deleted; disable the provider instead"));
+                  break;
+               }
             }
          }
          List<QRecord> remaining = new ArrayList<>(SystemWrites.query(EmailTables.PROVIDER, new QQueryFilter(), input.getTransaction()));

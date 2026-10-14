@@ -119,9 +119,10 @@ class EmailHomePolishTest
    void stackedBarsAndCompactAxes() throws Exception
    {
       int number = 0;
+      Integer messageId = SystemWrites.insertOne(EmailTables.MESSAGE, new QRecord().withValue("status", "QUEUED")).getValueInteger("id");
       for(String outcome : List.of("SUCCEEDED", "TRANSIENT_FAILURE", "PROVIDER_FAILURE", "PERMANENT_FAILURE", "LEASE_EXPIRED", "IN_FLIGHT"))
       {
-         SystemWrites.insertOne(EmailTables.ATTEMPT, new QRecord().withValue("messageId", 1).withValue("attemptNumber", ++number)
+         SystemWrites.insertOne(EmailTables.ATTEMPT, new QRecord().withValue("messageId", messageId).withValue("attemptNumber", ++number)
             .withValue("outcome", outcome).withValue("endDate", NOW));
       }
       for(var reason : EmailEnums.SuppressionReason.values())
