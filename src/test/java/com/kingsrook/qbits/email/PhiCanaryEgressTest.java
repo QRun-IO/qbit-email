@@ -104,11 +104,45 @@ class PhiCanaryEgressTest
       SystemWrites.updateOne(EmailTables.VERSION, new QRecord().withValue("id", version.getValue("id")).withValue("subject", "{{patient.name}}"));
    }
 
+   private static boolean coreVectorKey = false;
+
+
+
+   /*******************************************************************************
+    ** The stand-in matches core ClassifiedValueTokens (QRun-IO/qqq#1182) on its
+    ** published context vector: key bytes 00..1f, key id env1.
+    *******************************************************************************/
+   @Test
+   void standInMatchesCoreVector()
+   {
+      coreVectorKey = true;
+      try
+      {
+         assertThat(EmailValueTokens.forContext(List.of("email", "welcome", "recipient", "message-7"), "Ada@example.com"))
+            .isEqualTo("hmac:v1:env1:p1BggBbb8ytFgS5YeM6eBiriGgC1j3x0YGjics5qVeM");
+      }
+      finally
+      {
+         coreVectorKey = false;
+      }
+   }
+
+
+
    /*******************************************************************************
     ** Fixed non-production keys, resolved in memory only.
     *******************************************************************************/
    private static String secret(String name)
    {
+      if(coreVectorKey && "QQQ_AUDIT_HMAC_KEY".equals(name))
+      {
+         byte[] key = new byte[32];
+         for(int i = 0; i < key.length; i++)
+         {
+            key[i] = (byte) i;
+         }
+         return (Base64.getEncoder().encodeToString(key));
+      }
       return (switch(name)
       {
          case "QQQ_EMAIL_BODY_KEY" -> "test-only-body-key";
@@ -340,15 +374,15 @@ class PhiCanaryEgressTest
       String token = EmailValueTokens.forContext(binding, canary);
       assertThat(token).startsWith("hmac:v1:");
       assertThat(EmailValueTokens.forContext(binding, canary)).isEqualTo(token);
-      assertThat(EmailValueTokens.verifyContext(token, binding, canary)).isTrue();
-      assertThat(EmailValueTokens.verifyContext(token, List.of("different"), canary)).isFalse();
+      assertThat(EmailValueTokens.verifyContext(binding, canary, token)).isTrue();
+      assertThat(EmailValueTokens.verifyContext(List.of("different"), canary, token)).isFalse();
       assertThat(EmailValueTokens.forContext(binding, true)).isEqualTo("changed:v1");
       assertThat(EmailValueTokens.forContext(binding, "aaaaaa")).isEqualTo("changed:v1");
-      assertThat(EmailValueTokens.verifyContext("shred:v1", binding, true)).isFalse();
-      assertThat(EmailValueTokens.verifyContext("changed:v1", binding, true)).isFalse();
+      assertThat(EmailValueTokens.verifyContext(binding, true, "shred:v1")).isFalse();
+      assertThat(EmailValueTokens.verifyContext(binding, true, "changed:v1")).isFalse();
       String record = EmailValueTokens.forRecordField(patient, patient.getField("name"), 1, canary);
-      assertThat(EmailValueTokens.verifyRecordField(record, patient, patient.getField("name"), 1, canary)).isTrue();
-      assertThat(EmailValueTokens.verifyRecordField(record, patient, patient.getField("name"), 2, canary)).isFalse();
+      assertThat(EmailValueTokens.verifyRecordField(patient, patient.getField("name"), 1, canary, record)).isTrue();
+      assertThat(EmailValueTokens.verifyRecordField(patient, patient.getField("name"), 2, canary, record)).isFalse();
       assertThat(EmailValueTokens.canonical(new BigDecimal("1.2000"))).isEqualTo("1.2");
       assertThat(EmailValueTokens.canonical(Instant.parse("2026-10-13T12:00:00Z"))).isEqualTo("2026-10-13T12:00:00Z");
       String encrypted = EmailBodyEncryption.encrypt(canary, "subject", "test");
