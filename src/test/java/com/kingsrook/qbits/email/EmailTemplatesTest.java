@@ -148,7 +148,10 @@ class EmailTemplatesTest
       assertThat(((RawHTML) preview.getWidgetData()).getHtml()).contains("<p>Email</p>");
       assertThat(EmailStore.get(EmailTables.VERSION, version.getValueInteger("id"), null).getValue("compiledHtml")).isNull();
       EmailVersions.activate(version.getValueInteger("id"));
-      EmailRuntime.config().withMjmlCompiler(source -> { throw new AssertionError("Compiler ran at send time"); });
+      EmailRuntime.config().withMjmlCompiler(source ->
+      {
+         throw new AssertionError("Compiler ran at send time");
+      });
       var result = EmailService.send(new EmailRequest().withTemplateName("mjml").withLocale("fr").withTo("p@example.com"));
       assertThat(result.status()).isEqualTo(EmailSendResult.Status.QUEUED);
       QRecord row = EmailStore.get(EmailTables.MESSAGE, result.messageId(), null);
@@ -295,7 +298,10 @@ class EmailTemplatesTest
       EmailRuntime.config().withSecretResolver(name -> null);
       assertThat(com.kingsrook.qbits.email.render.EmailUnsubscribeLinks.create("1", "address", "NOTIFICATION")).isNull();
       assertThatThrownBy(() -> com.kingsrook.qbits.email.render.EmailUnsubscribeLinks.create("1", "address", "MARKETING")).hasMessageContaining("QQQ_EMAIL_UNSUBSCRIBE_KEY");
-      EmailRuntime.config().withSecretResolver(name -> { throw new IllegalArgumentException("resolver detail"); });
+      EmailRuntime.config().withSecretResolver(name ->
+      {
+         throw new IllegalArgumentException("resolver detail");
+      });
       assertThatThrownBy(() -> com.kingsrook.qbits.email.render.EmailUnsubscribeLinks.create("1", "person@example.com", "NOTIFICATION"))
          .hasMessage("Opt-out email needs publicBaseUrl and QQQ_EMAIL_UNSUBSCRIBE_KEY");
    }

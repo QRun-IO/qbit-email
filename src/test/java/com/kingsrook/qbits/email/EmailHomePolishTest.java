@@ -30,9 +30,9 @@ import java.util.Set;
 import com.kingsrook.qbits.email.app.EmailHome;
 import com.kingsrook.qbits.email.metadata.EmailEnums;
 import com.kingsrook.qbits.email.metadata.EmailTables;
+import com.kingsrook.qbits.email.outbox.EmailCategory;
 import com.kingsrook.qbits.email.render.ContrastCheck;
 import com.kingsrook.qbits.email.render.EmailLayout;
-import com.kingsrook.qbits.email.outbox.EmailCategory;
 import com.kingsrook.qbits.email.support.SystemWrites;
 import com.kingsrook.qqq.backend.core.actions.dashboard.RenderWidgetAction;
 import com.kingsrook.qqq.backend.core.actions.tables.GetAction;
@@ -66,7 +66,9 @@ class EmailHomePolishTest
    @BeforeEach
    void setup() throws Exception
    {
-      H2Support.setup(c -> { });
+      H2Support.setup(c ->
+      {
+      });
       EmailRuntime.setClock(Clock.fixed(NOW, ZoneOffset.UTC));
       H2Support.provider(25);
    }

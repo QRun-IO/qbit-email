@@ -53,7 +53,26 @@ final class EmailMime
       noLineBreaks(envelope.getFrom());
       noLineBreaks(envelope.getReplyTo());
       noLineBreaks(envelope.getMessageId());
-      MimeMessage message = new MimeMessage(session);
+      noLineBreaks(envelope.getRfcMessageId());
+      String rfcMessageId = envelope.getRfcMessageId();
+      MimeMessage message = new MimeMessage(session)
+      {
+         /*******************************************************************************
+          ** JavaMail may save again when sending; keep the persisted identity each time.
+          *******************************************************************************/
+         @Override
+         protected void updateMessageID() throws MessagingException
+         {
+            if(rfcMessageId == null)
+            {
+               super.updateMessageID();
+            }
+            else
+            {
+               setHeader("Message-ID", rfcMessageId);
+            }
+         }
+      };
       message.setFrom(new InternetAddress(envelope.getFrom(), true));
       recipients(message, Message.RecipientType.TO, envelope.getTo());
       recipients(message, Message.RecipientType.CC, envelope.getCc());

@@ -21,6 +21,7 @@
 package com.kingsrook.qbits.email.transport;
 
 
+import javax.net.ssl.SSLSession;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -44,7 +45,6 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.net.ssl.SSLSession;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.kingsrook.qbits.email.EmailQBitConfig;
 import com.kingsrook.qbits.email.EmailRuntime;
@@ -147,9 +147,9 @@ class EmailHttpTransportsTest
     *******************************************************************************/
    private static EmailEnvelope envelope()
    {
-      return (new EmailEnvelope().withMessageId("42").withFrom("Sender <sender@example.com>")
+      return (new EmailEnvelope().withMessageId("42").withRfcMessageId("<0123456789abcdef0123456789abcdef@example.com>").withFrom("Sender <sender@example.com>")
          .withTo(List.of("Person <to@example.com>")).withCc(List.of("cc@example.com")).withBcc(List.of("bcc@example.com"))
-         .withReplyTo("Replies <reply@example.com>").withSubject("Hello \u00e9").withTextBody("Plain \u00e9").withHtmlBody("<b>Hello \u00e9</b>")
+         .withReplyTo("Replies <reply@example.com>").withSubject("Hello é").withTextBody("Plain é").withHtmlBody("<b>Hello é</b>")
          .withHeaders(Map.of("List-Unsubscribe", "<https://example.com/unsubscribe>",
             "List-Unsubscribe-Post", "List-Unsubscribe=One-Click", "X-Custom", "kept")));
    }
@@ -283,6 +283,11 @@ class EmailHttpTransportsTest
       assertThat(json.path("MessageStream").asText()).isEqualTo(tracking ? "broadcasts" : "outbound");
       assertThat(json.path("TrackOpens").asBoolean()).isEqualTo(tracking);
       assertThat(json.path("TrackLinks").asText()).isEqualTo(tracking ? "HtmlAndText" : "None");
+      assertThat(json.path("Headers")).anySatisfy(header ->
+      {
+         assertThat(header.path("Name").asText()).isEqualTo("Message-ID");
+         assertThat(header.path("Value").asText()).isEqualTo(envelope().getRfcMessageId());
+      });
       assertThat(json.path("Headers").toString()).contains("List-Unsubscribe", "List-Unsubscribe-Post", "X-QQQ-Email-Id", "42", "Auto-Submitted");
       assertThat(json.toString()).doesNotContain(SECRET);
    }
@@ -303,6 +308,7 @@ class EmailHttpTransportsTest
          return (response(202, "", Map.of("x-message-id", List.of("sg-id"))));
       });
       Map<String, String> headers = new java.util.HashMap<>(envelope().getHeaders());
+      headers.put("message-id", "<override@example.com>");
       for(String reserved : List.of("X-SG-ID", "x-sg-eid", "Received", "DKIM-Signature", "Content-Type",
          "Content-Transfer-Encoding", "To", "From", "Subject", "Reply-To", "CC", "BcC"))
       {
@@ -329,6 +335,8 @@ class EmailHttpTransportsTest
       assertThat(json.at("/content/1/type").asText()).isEqualTo("text/html");
       assertThat(json.at("/content/1/value").asText()).isEqualTo(envelope().getHtmlBody());
       assertThat(json.at("/custom_args/qqq_email_id").asText()).isEqualTo("42");
+      assertThat(json.at("/headers/Message-ID").asText()).isEqualTo(envelope().getRfcMessageId());
+      assertThat(json.path("headers").has("message-id")).isFalse();
       assertThat(json.path("headers").toString()).doesNotContain("must-be-removed").contains("List-Unsubscribe", "List-Unsubscribe-Post");
       assertThat(json.at("/tracking_settings/open_tracking/enable").asBoolean()).isEqualTo(tracking);
       assertThat(json.at("/tracking_settings/click_tracking/enable").asBoolean()).isEqualTo(tracking);
@@ -371,6 +379,8 @@ class EmailHttpTransportsTest
       assertThat(mime).doesNotContain("bcc@example.com", "Bcc:", SECRET);
       MimeMessage message = new MimeMessage(Session.getInstance(new Properties()), new ByteArrayInputStream(mime.getBytes(StandardCharsets.UTF_8)));
       assertThat(message.getSubject()).isEqualTo(envelope().getSubject());
+      assertThat(message.getMessageID()).isEqualTo(envelope().getRfcMessageId());
+      assertThat(multipart).contains("name=\"h:Message-Id\"\r\n\r\n" + envelope().getRfcMessageId() + "\r\n");
       assertThat(message.getHeader("X-QQQ-Email-Id", null)).isEqualTo("42");
       assertThat(message.getHeader("List-Unsubscribe-Post", null)).isEqualTo("List-Unsubscribe=One-Click");
       assertThat(message.getRecipients(jakarta.mail.Message.RecipientType.CC)[0].toString()).isEqualTo("cc@example.com");

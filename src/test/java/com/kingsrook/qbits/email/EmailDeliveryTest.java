@@ -21,18 +21,34 @@
 package com.kingsrook.qbits.email;
 
 import java.net.ServerSocket;
-import java.time.*;
-import java.util.*;
-import java.util.concurrent.*;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import com.icegreen.greenmail.util.GreenMail;
 import com.icegreen.greenmail.util.ServerSetup;
-import com.kingsrook.qbits.email.delivery.*;
+import com.kingsrook.qbits.email.delivery.EmailDispatcher;
 import com.kingsrook.qbits.email.metadata.EmailTables;
-import com.kingsrook.qbits.email.outbox.*;
+import com.kingsrook.qbits.email.outbox.EmailCategory;
+import com.kingsrook.qbits.email.outbox.EmailRequest;
+import com.kingsrook.qbits.email.outbox.EmailSendResult;
+import com.kingsrook.qbits.email.outbox.EmailService;
 import com.kingsrook.qbits.email.processes.EmailProcesses;
-import com.kingsrook.qbits.email.support.*;
-import com.kingsrook.qbits.email.transport.*;
+import com.kingsrook.qbits.email.support.EmailStore;
+import com.kingsrook.qbits.email.support.SystemWrites;
+import com.kingsrook.qbits.email.transport.EmailTransport;
+import com.kingsrook.qbits.email.transport.EmailTransportException;
+import com.kingsrook.qbits.email.transport.EmailTransportRegistry;
+import com.kingsrook.qbits.email.transport.EmailTransportResult;
+import com.kingsrook.qbits.email.transport.SmtpEmailTransport;
 import com.kingsrook.qqq.backend.core.actions.QBackendTransaction;
 import com.kingsrook.qqq.backend.core.actions.messaging.SendMessageAction;
 import com.kingsrook.qqq.backend.core.alerts.AlertResolution;
@@ -41,16 +57,23 @@ import com.kingsrook.qqq.backend.core.alerts.AlertSinkInterface;
 import com.kingsrook.qqq.backend.core.alerts.AlertsInstanceMetaData;
 import com.kingsrook.qqq.backend.core.context.QContext;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
-import com.kingsrook.qqq.backend.core.model.actions.messaging.*;
-import com.kingsrook.qqq.backend.core.model.actions.messaging.email.*;
+import com.kingsrook.qqq.backend.core.model.actions.messaging.Content;
+import com.kingsrook.qqq.backend.core.model.actions.messaging.MultiParty;
+import com.kingsrook.qqq.backend.core.model.actions.messaging.Party;
+import com.kingsrook.qqq.backend.core.model.actions.messaging.SendMessageInput;
+import com.kingsrook.qqq.backend.core.model.actions.messaging.email.EmailContentRole;
+import com.kingsrook.qqq.backend.core.model.actions.messaging.email.EmailPartyRole;
 import com.kingsrook.qqq.backend.core.model.actions.tables.insert.InsertInput;
 import com.kingsrook.qqq.backend.core.model.data.QRecord;
 import com.kingsrook.qqq.backend.core.model.metadata.code.QCodeReference;
 import jakarta.mail.Multipart;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /*******************************************************************************
  ** Email Delivery Test.
@@ -399,6 +422,39 @@ class EmailDeliveryTest
    }
 
    /*******************************************************************************
+    ** A lost acknowledgement retries the stored identity through the real SMTP sink.
+    *******************************************************************************/
+   @Test
+   void smtpRetryPreservesStoredMessageId() throws Exception
+   {
+      var queued = EmailService.send(request().withIdempotencyKey("job:1:row:mail"));
+      String stored = message(queued.messageId()).getValueString("rfcMessageId");
+      AtomicInteger calls = new AtomicInteger();
+      var dispatcher = fake((envelope, settings) ->
+      {
+         assertThat(envelope.getRfcMessageId()).isEqualTo(stored);
+         var sent = new SmtpEmailTransport().send(envelope, settings);
+         if(calls.incrementAndGet() == 1)
+         {
+            throw new EmailTransportException("Lost acknowledgement", false);
+         }
+         return (sent);
+      });
+      assertThat(dispatcher.sendNow(queued.messageId())).isEqualTo(EmailDispatcher.SendResult.RETRY_WAIT);
+      EmailRuntime.setClock(Clock.fixed(now.plusSeconds(301), ZoneOffset.UTC));
+      assertThat(dispatcher.sendNow(queued.messageId())).isEqualTo(EmailDispatcher.SendResult.SENT);
+      assertThat(mail.waitForIncomingEmail(2000, 2)).isTrue();
+      assertThat(mail.getReceivedMessages()).hasSize(2);
+      for(var received : mail.getReceivedMessages())
+      {
+         assertThat(received.getMessageID()).isEqualTo(stored);
+         assertThat(received.getHeader("X-QQQ-Email-Id")).containsExactly(queued.messageId().toString());
+      }
+      assertThat(message(queued.messageId()).getValueString("rfcMessageId")).isEqualTo(stored);
+      assertThat(H2Support.all(EmailTables.ATTEMPT)).hasSize(2);
+   }
+
+   /*******************************************************************************
     ** Smtp Authentication And Secret Resolution Only At Send.
     *******************************************************************************/
    @Test
@@ -477,8 +533,8 @@ class EmailDeliveryTest
       var second = EmailService.send(request());
       fake((e, s) ->
       {
-               throw new EmailTransportException("throttle", false).withRetryAfter(Duration.ofHours(2));
-            })
+         throw new EmailTransportException("throttle", false).withRetryAfter(Duration.ofHours(2));
+      })
             .runOnce();
       assertThat(message(second.messageId()).getValueInstant("nextAttemptDate"))
             .isEqualTo(now.plusSeconds(3960));
@@ -494,8 +550,8 @@ class EmailDeliveryTest
       assertThat(
                   fake((e, s) ->
                   {
-                           throw new EmailTransportException("rejected", true);
-                        })
+                     throw new EmailTransportException("rejected", true);
+                  })
                         .sendNow(queued.messageId()))
             .isEqualTo(EmailDispatcher.SendResult.DEAD_LETTER);
       var future = EmailService.send(request());
