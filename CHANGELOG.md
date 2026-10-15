@@ -17,6 +17,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - `EmailTablesGuardrailTest`: every table is used by runtime code, seeded or listed as starting empty with a reason, and has help.
 
 ### Fixed
+- Derive the qbit metadata version from the Maven artifact version so released artifacts report their release version.
 - `email_template.ownerQbit` was stored but never read, and the built-in template did not set it. The built-in now names `qbit-email`, the field is read-only with help, and messages sent from a template name its owner qbit as `senderQbit` unless the request names one.
 
 ### Added
