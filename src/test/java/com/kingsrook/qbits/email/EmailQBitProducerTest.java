@@ -48,13 +48,17 @@ class EmailQBitProducerTest
       assertThat(producer.isEnabled()).isTrue();
       assertThat(producer.getNamespace()).isNull();
       assertThat(producer.getQBitConfig().getBackendName()).isEqualTo("memory");
+      String artifactVersion = System.getProperty("qbit.artifactVersion");
+      assertThat(artifactVersion).isNotBlank();
+      assertThat(EmailQBitProducer.VERSION).isEqualTo(artifactVersion);
+      assertThat(producer.getQBitMetaData().getVersion()).isEqualTo(artifactVersion);
       assertThat(producer.produce(instance)).isNotNull();
       assertThat(instance.getQBits()).isNotEmpty();
       assertThat(instance.getTable("helpContent")).isNull();
       assertThat(HelpBundles.of(instance).getBundles()).singleElement().satisfies(bundle ->
       {
          assertThat(bundle.getId()).isEqualTo("qbit-email");
-         assertThat(bundle.getVersion()).matches("\\d+\\.\\d+\\.\\d+(-SNAPSHOT|-RC\\.\\d+)?");
+         assertThat(bundle.getVersion()).isEqualTo(artifactVersion).isEqualTo(EmailQBitProducer.VERSION);
       });
    }
 

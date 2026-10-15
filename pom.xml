@@ -175,6 +175,7 @@
             <filtering>true</filtering>
             <includes>
                <include>help/*.yaml</include>
+               <include>qbit-email.properties</include>
             </includes>
          </resource>
          <resource>
@@ -182,10 +183,20 @@
             <filtering>false</filtering>
             <excludes>
                <exclude>help/*.yaml</exclude>
+               <exclude>qbit-email.properties</exclude>
             </excludes>
          </resource>
       </resources>
       <plugins>
+         <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <configuration>
+               <systemPropertyVariables combine.children="append">
+                  <qbit.artifactVersion>${project.version}</qbit.artifactVersion>
+               </systemPropertyVariables>
+            </configuration>
+         </plugin>
          <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-checkstyle-plugin</artifactId>
