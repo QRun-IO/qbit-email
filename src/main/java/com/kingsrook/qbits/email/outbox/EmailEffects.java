@@ -42,8 +42,15 @@ public final class EmailEffects
    /*******************************************************************************
     ** A refusal can have a reference when suppression retained an audit row.
     *******************************************************************************/
-   public record Result(EmailEffectOutcome outcome, EmailMessageRef message)
+   public record Result(EmailEffectOutcome outcome, EmailMessageRef message, List<String> reasons)
    {
+      /*******************************************************************************
+       ** Preserve the original constructor for callers that only need the reference.
+       *******************************************************************************/
+      public Result(EmailEffectOutcome outcome, EmailMessageRef message)
+      {
+         this(outcome, message, List.of());
+      }
    }
 
 
@@ -68,14 +75,15 @@ public final class EmailEffects
          || request.getTransaction() != null
          || request.getIdempotencyKey() != null && !request.getIdempotencyKey().equals(effectIdempotencyKey))
       {
-         return (new Result(EmailEffectOutcome.REFUSED, null));
+         return (new Result(EmailEffectOutcome.REFUSED, null, List.of("An email request without a caller transaction and a valid, matching effect key are required")));
       }
       request.withIdempotencyKey(effectIdempotencyKey);
       EmailSendResult result = EmailService.send(request);
       EmailMessageRef message = result.messageId() == null ? null : find("id", result.messageId()).orElseThrow(() -> new QException("Queued email reference is unavailable"));
       boolean refused = result.status() == EmailSendResult.Status.REFUSED || result.status() == EmailSendResult.Status.SUPPRESSED
          || message != null && "SUPPRESSED".equals(message.status());
-      return (new Result(refused ? EmailEffectOutcome.REFUSED : EmailEffectOutcome.QUEUED_OR_DUPLICATE, message));
+      List<String> reasons = message != null && "SUPPRESSED".equals(message.status()) ? List.of("All recipients are suppressed") : result.reasons();
+      return (new Result(refused ? EmailEffectOutcome.REFUSED : EmailEffectOutcome.QUEUED_OR_DUPLICATE, message, reasons));
    }
 
 

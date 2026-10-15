@@ -30,6 +30,9 @@ import java.util.List;
 import java.util.Locale;
 import com.kingsrook.qbits.email.EmailRuntime;
 import com.kingsrook.qbits.email.metadata.EmailTables;
+import com.kingsrook.qbits.email.permissions.EmailPermissionChecker;
+import com.kingsrook.qbits.email.permissions.EmailPermissions;
+import com.kingsrook.qbits.email.template.EmailBuiltIns;
 import com.kingsrook.qqq.backend.core.actions.tables.CountAction;
 import com.kingsrook.qqq.backend.core.actions.tables.QueryAction;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
@@ -85,7 +88,14 @@ public final class EmailHome
       totals.add(count(EmailTables.SUPPRESSION, new QQueryFilter()));
       List<QRecord> messages = query(EmailTables.MESSAGE, new QQueryFilter().withOrderBy(new QFilterOrderBy("createDate", false))
          .withOrderBy(new QFilterOrderBy("id", false)).withLimit(20), List.of("id", "createDate", "toAddresses", "subject", "phiApproved", "status"));
-      return (new RawHTML(null, EmailHomeView.render(totals, hourly(), messages, suppressions())));
+      boolean admin = EmailPermissionChecker.has(EmailPermissions.ADMIN);
+      List<EmailSetupStatus.Item> setup = List.of();
+      if(admin)
+      {
+         EmailBuiltIns.ensure();
+         setup = EmailSetupStatus.load();
+      }
+      return (new RawHTML(null, EmailHomeView.render(totals, hourly(), messages, suppressions(), setup)));
    }
 
    /*******************************************************************************

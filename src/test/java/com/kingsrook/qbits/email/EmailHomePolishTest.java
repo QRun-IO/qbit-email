@@ -108,7 +108,7 @@ class EmailHomePolishTest
          assertThat(tiles.get(i).child(0).attr("style")).contains("font-size:1.6rem");
          assertThat(tiles.get(i).child(0).attr("style").contains("#d64545")).isEqualTo(i == 2 || i == 3);
       }
-      assertThat(document.select("h3")).extracting(Element::text).containsExactly("Sends per hour, last 24 hours", "Recent messages", "Suppressions added, last 30 days");
+      assertThat(document.select("h3")).extracting(Element::text).containsExactly("Setup", "Sends per hour, last 24 hours", "Recent messages", "Suppressions added, last 30 days");
       assertThat(QContext.getQInstance().getApp("email").getWidgets()).containsExactly("emailHealth", "emailHome");
    }
 
@@ -119,9 +119,10 @@ class EmailHomePolishTest
    void stackedBarsAndCompactAxes() throws Exception
    {
       int number = 0;
+      Integer messageId = SystemWrites.insertOne(EmailTables.MESSAGE, new QRecord().withValue("status", "QUEUED")).getValueInteger("id");
       for(String outcome : List.of("SUCCEEDED", "TRANSIENT_FAILURE", "PROVIDER_FAILURE", "PERMANENT_FAILURE", "LEASE_EXPIRED", "IN_FLIGHT"))
       {
-         SystemWrites.insertOne(EmailTables.ATTEMPT, new QRecord().withValue("messageId", 1).withValue("attemptNumber", ++number)
+         SystemWrites.insertOne(EmailTables.ATTEMPT, new QRecord().withValue("messageId", messageId).withValue("attemptNumber", ++number)
             .withValue("outcome", outcome).withValue("endDate", NOW));
       }
       for(var reason : EmailEnums.SuppressionReason.values())

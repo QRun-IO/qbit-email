@@ -36,6 +36,8 @@ import com.kingsrook.qqq.backend.core.model.data.QRecord;
  *******************************************************************************/
 public final class EmailBuiltIns
 {
+   public static final String OWNER = "qbit-email";
+
    /*******************************************************************************
     ** Utility class.
     *******************************************************************************/
@@ -55,7 +57,7 @@ public final class EmailBuiltIns
       try(QBackendTransaction tx = QBackendTransaction.openFor(new InsertInput(EmailTables.TEMPLATE)))
       {
          QRecord template = SystemWrites.insert(EmailTables.TEMPLATE, List.of(new QRecord().withValue("name", "email_secure_message")
-            .withValue("label", "Secure message").withValue("kind", "MARKDOWN").withValue("category", "SECURITY").withValue("phiApproved", false)), tx).getRecords().getFirst();
+            .withValue("label", "Secure message").withValue("kind", "MARKDOWN").withValue("category", "SECURITY").withValue("phiApproved", false).withValue("ownerQbit", OWNER)), tx).getRecords().getFirst();
          if(template.getValue("id") == null || template.getErrors() != null && !template.getErrors().isEmpty())
          {
             tx.rollback();

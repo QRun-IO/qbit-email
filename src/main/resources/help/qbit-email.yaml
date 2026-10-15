@@ -1,0 +1,710 @@
+bundle: qbit-email
+version: 0.1.0-SNAPSHOT
+layer: QBIT
+entries:
+- key: app:email;slot:help
+  summary: 'Manage outgoing email, templates, delivery results and addresses that must not receive messages.'
+  content: |
+    Use **Messages** to follow outgoing mail from queuing through delivery attempts and provider events. Open **Templates** and their versions to prepare reusable content, and **Brands** to control its appearance.
+
+    Configure delivery services and sender addresses under **Providers**. **Suppressions** records addresses that should not receive some or all mail. Sending uses the outbox, so a queued message is not yet proof of delivery. Your email permissions determine which settings and actions you can use.
+- key: table:email_provider;slot:help
+  summary: 'A delivery service and its sender, connection, tracking and rate-limit settings.'
+  content: |
+    **How rows get created:** Add your delivery connection with **New**, then configure an enabled default before sending. Without a provider, messages cannot be sent.
+
+    Configure a provider before sending mail. Choose the delivery service, connection settings and sender identity, then use **Send Test Email** to check it. Credential settings hold environment variable names; the server resolves their values when needed.
+
+    When providers are enabled, exactly one must be the enabled default. Providers with message history cannot be deleted; disable them instead. Open **Sender Addresses** to manage additional senders, **Messages** to inspect outgoing mail and **Webhook Inbox** to inspect delivery notifications.
+- key: table:email_provider;field:name
+  summary: 'A unique name used to select this delivery provider.'
+- key: table:email_provider;field:label
+  summary: 'The display name for this provider.'
+- key: table:email_provider;field:kind
+  summary: 'The delivery service or protocol used to send mail.'
+  content: |
+    Choose the transport used by your delivery service. The available choices are {{values:email_provider_kind}}. Connection and credential requirements depend on the chosen kind, so check the provider setup before testing. Gmail API sending is not implemented in this version; use Gmail SMTP when appropriate. Use **Send Test Email** to check the configured provider.
+- key: table:email_provider;field:enabled
+  summary: 'Whether this provider is available for sending mail.'
+- key: table:email_provider;field:isDefault
+  summary: 'Whether this is the enabled provider used when no provider is selected.'
+  content: |
+    The default provider is selected when a send does not name a provider. When any providers are enabled, exactly one must be the enabled default. Coordinate changes to the old and new defaults together. This choice selects the delivery service; the default under **Sender Addresses** separately controls the preferred sender within that service.
+- key: table:email_provider;field:fromAddress
+  summary: 'The fallback sender address when no sender-address row takes precedence.'
+  content: |
+    These values provide the provider’s fallback sending identity. An enabled default under **Sender Addresses** takes precedence. Once sender-address rows exist, an explicitly supplied sender must match an allowed address for this provider. Check both the fallback and the sender rows when a send is refused or a test uses an unexpected identity.
+- key: table:email_provider;field:fromName
+  summary: 'The display name accompanying the fallback sender address.'
+  content: |
+    These values provide the provider’s fallback sending identity. An enabled default under **Sender Addresses** takes precedence. Once sender-address rows exist, an explicitly supplied sender must match an allowed address for this provider. Check both the fallback and the sender rows when a send is refused or a test uses an unexpected identity.
+- key: table:email_provider;field:replyTo
+  summary: 'The address recipients should use when replying.'
+- key: table:email_provider;field:sendingDomain
+  summary: 'The sending domain used by the provider and its allowed sender addresses.'
+  content: |
+    The sending domain is used by provider-specific delivery configuration and constrains **Sender Addresses**. When a domain is configured, every sender-address row must belong to it. A change that would leave existing sender rows in another domain is refused. Review the provider and its sender list together before changing this setting, then test the resulting delivery configuration.
+- key: table:email_provider;field:host
+  summary: 'The mail server hostname for an SMTP connection.'
+- key: table:email_provider;field:port
+  summary: 'The mail server port for an SMTP connection.'
+- key: table:email_provider;field:security
+  summary: 'The transport security setting for the SMTP connection.'
+  content: |
+    Choose the connection protection required by your SMTP server. The available settings are {{values:email_security}}, with metadata default {{default:email_provider.security}}. STARTTLS requires upgrading the connection, while TLS starts with an encrypted connection. Match the host and port to the server’s configuration. Check the result with **Send Test Email** before relying on outgoing mail.
+- key: table:email_provider;field:region
+  summary: 'The provider region used for delivery.'
+- key: table:email_provider;field:usernameEnvName
+  summary: 'The environment variable name containing the provider’s login name or access key.'
+  content: |
+    Enter the **name** of an environment variable available to the server, never the credential value. The name must be allowed for the provider configuration. The service resolves the value when it needs to authenticate or verify a notification. If setup fails, check both the allowed reference and whether that variable is set on the running server.
+- key: table:email_provider;field:secretEnvName
+  summary: 'The environment variable name containing the provider’s password or API credential.'
+  content: |
+    Enter the **name** of an environment variable available to the server, never the credential value. The name must be allowed for the provider configuration. The service resolves the value when it needs to authenticate or verify a notification. If setup fails, check both the allowed reference and whether that variable is set on the running server.
+- key: table:email_provider;field:webhookSecretEnvName
+  summary: 'The environment variable name containing the notification verification credential.'
+  content: |
+    Enter the **name** of an environment variable available to the server, never the credential value. The name must be allowed for the provider configuration. The service resolves the value when it needs to authenticate or verify a notification. If setup fails, check both the allowed reference and whether that variable is set on the running server.
+- key: table:email_provider;field:snsTopicArn
+  summary: 'The Amazon notification topic expected for SES delivery notifications.'
+- key: table:email_provider;field:configurationSet
+  summary: 'The SES configuration set attached to outgoing mail.'
+- key: table:email_provider;field:messageStream
+  summary: 'The Postmark message stream used for outgoing mail.'
+- key: table:email_provider;field:maxPerMinute
+  summary: 'The provider’s configured sending limit per minute.'
+- key: table:email_provider;field:maxPerDay
+  summary: 'The provider’s configured sending limit per day.'
+- key: table:email_provider;field:trackOpens
+  summary: 'Whether open tracking is requested from a provider that supports it.'
+  content: |
+    Tracking requests engagement information from a provider that supports it. These settings are separate from basic sending and delivery notifications. Review whether tracking is appropriate for your messages before enabling it. Reported engagement appears under **Events** on a message; absence of a tracking event does not prove the recipient did not read or use the message.
+- key: table:email_provider;field:trackClicks
+  summary: 'Whether link tracking is requested from a provider that supports it.'
+  content: |
+    Tracking requests engagement information from a provider that supports it. These settings are separate from basic sending and delivery notifications. Review whether tracking is appropriate for your messages before enabling it. Reported engagement appears under **Events** on a message; absence of a tracking event does not prove the recipient did not read or use the message.
+- key: table:email_provider;field:phiAllowed
+  summary: 'Whether this provider is approved to receive protected health information.'
+  content: |
+    This setting records whether the provider may receive protected health information. It is only one part of the send checks: template-version approval and variable classification also matter. Review your approved provider arrangement before enabling it. If a protected message is refused, inspect the **Template**, its approved version and the chosen provider rather than treating this flag as a universal override.
+- key: table:email_provider;field:healthStatus
+  summary: 'The provider’s current sending health state.'
+  content: |
+    The recorded health states are {{values:email_health_status}}. Use this together with the most recent success, failure time and failure message to investigate provider problems. Account and credential failures can pause sending through a provider. Check the configuration and use **Send Test Email** after correcting the cause, then inspect the resulting message and attempts.
+- key: table:email_provider;field:lastSuccessDate
+  summary: 'When sending through this provider last succeeded.'
+- key: table:email_provider;field:lastFailureDate
+  summary: 'When sending through this provider last failed.'
+- key: table:email_provider;field:lastFailureMessage
+  summary: 'The most recent sending failure recorded for this provider.'
+- key: table:email_provider_sender_address;slot:help
+  summary: 'An address you can send from through a particular email provider.'
+  content: |
+    **How rows get created:** Add an address from a provider's **Sender Addresses** list. Without sender-address rows, the provider's fallback sender is used.
+
+    Use **Sender Addresses** on a provider to manage its allowed sending identities. Each address must be unique within that provider, and an address must match the provider’s sending domain when one is configured.
+
+    At most one enabled address can be the default. That default takes precedence over the provider’s fallback sender. Once sender rows exist, an explicitly chosen sender must match an enabled row for the selected provider. The selected address is recorded on **Messages**.
+- key: table:email_provider_sender_address;field:providerId
+  summary: 'The provider allowed to use this sender address.'
+- key: table:email_provider_sender_address;field:address
+  summary: 'The email address used as the sender.'
+- key: table:email_provider_sender_address;field:displayName
+  summary: 'The name recipients see beside the sender address.'
+- key: table:email_provider_sender_address;field:isDefault
+  summary: 'Whether this enabled address is the provider’s preferred sender.'
+- key: table:email_provider_sender_address;field:enabled
+  summary: 'Whether this address can be selected for sending.'
+- key: table:email_provider_sender_address;field:note
+  summary: 'Your notes about this sender address.'
+- key: table:email_message;slot:help
+  summary: 'An outgoing email with its saved content, delivery state and retry history.'
+  content: |
+    **How rows get created:** Your application queues messages through the email service. You do not enter them manually. An empty list means no messages are currently retained.
+
+    Use **Messages** to check whether mail is waiting, being attempted, sent or reported as delivered. A provider accepting a message does not by itself prove that the recipient received it. Open **Attempts** for individual sending attempts and **Events** for provider notifications.
+
+    Messages are written by the email service, rather than edited directly. Use **Cancel**, **Send Now** or **Resend** when the message’s state permits the action. Saved content reflects the original send and may later be cleared by retention.
+- key: table:email_message;field:status
+  summary: 'The current delivery state of the outgoing message.'
+  content: |
+    The available states are {{values:email_message_status}}. Use the state to distinguish waiting or retrying mail from a provider handoff and later delivery events. A sent message is not necessarily delivered. Open **Attempts** for sending errors and **Events** for delivery, bounce or complaint reports before deciding whether a resend is appropriate.
+- key: table:email_message;field:toAddresses
+  summary: 'The message’s primary recipients.'
+- key: table:email_message;field:ccAddresses
+  summary: 'The recipients copied visibly on the message.'
+- key: table:email_message;field:bccAddresses
+  summary: 'The recipients copied without appearing in the message’s recipient headers.'
+- key: table:email_message;field:fromAddress
+  summary: 'The sender address saved for this message.'
+- key: table:email_message;field:fromAddressId
+  summary: 'The provider sender-address record selected for this message.'
+- key: table:email_message;field:replyTo
+  summary: 'The reply address saved for this message.'
+- key: table:email_message;field:subject
+  summary: 'The subject saved when the message was prepared.'
+- key: table:email_message;field:templateId
+  summary: 'The template used to prepare this message.'
+- key: table:email_message;field:templateVersionId
+  summary: 'The exact template version used to prepare this message.'
+- key: table:email_message;field:brandId
+  summary: 'The brand used when rendering this message.'
+- key: table:email_message;field:category
+  summary: 'The message category used for delivery and suppression rules.'
+  content: |
+    The categories are {{values:email_category}}. Category affects how suppression and unsubscribe rules apply, so check it when a recipient is omitted from a message. It also matters for retention: notification and marketing records remain to keep unsubscribe links working even after old content is cleared. Review the related **Suppression** and **Template** when investigating.
+- key: table:email_message;field:locale
+  summary: 'The language or locale requested for the message.'
+- key: table:email_message;field:variablesSnapshot
+  summary: 'The retained template variables, with sensitive values redacted.'
+  content: |
+    Use the saved variables to investigate what was queued. Sensitive values are replaced by non-recoverable tokens or redaction markers, so this snapshot is not a copy of every original input. Later template changes do not regenerate it. Retention can clear saved variables while preserving the message record and its identifiers.
+- key: table:email_message;field:htmlBody
+  summary: 'The rendered HTML content saved for this message.'
+  content: |
+    The message keeps the content prepared for this particular send. Inspect it when you need to understand what was queued, rather than assuming the current template still matches the original. Later template changes do not regenerate this saved content. Retention can clear bodies and variable values while preserving the message record and its identifiers.
+- key: table:email_message;field:textBody
+  summary: 'The plain-text content saved for this message.'
+  content: |
+    The message keeps the content prepared for this particular send. Inspect it when you need to understand what was queued, rather than assuming the current template still matches the original. Later template changes do not regenerate this saved content. Retention can clear bodies and variable values while preserving the message record and its identifiers.
+- key: table:email_message;field:phiApproved
+  summary: 'Whether the message carries approval for protected health information.'
+- key: table:email_message;field:unsubscribeUrl
+  summary: 'The unsubscribe link prepared for this message.'
+- key: table:email_message;field:bodySha256
+  summary: 'A checksum identifying the saved message content.'
+- key: table:email_message;field:idempotencyKey
+  summary: 'A caller-supplied reference used to prevent duplicate message creation.'
+  content: |
+    A sending caller can provide a stable reference so repeating the same request does not create duplicate mail while that record remains stored. Use it to trace retried application requests alongside the recorded message identifier. The reference is not the provider’s message identifier and does not prove delivery. Retention settings can affect how long message records remain available.
+- key: table:email_message;field:providerId
+  summary: 'The delivery provider chosen for this message.'
+- key: table:email_message;field:providerMessageId
+  summary: 'The identifier returned by the delivery provider.'
+- key: table:email_message;field:attemptCount
+  summary: 'The number of sending attempts recorded for this message.'
+- key: table:email_message;field:nextAttemptDate
+  summary: 'When this message next becomes eligible for a sending attempt.'
+  content: |
+    These times explain why a queued message is not currently being sent. **{{label:email_message.sendAfter}}** records a requested delay, **{{label:email_message.nextAttemptDate}}** records retry eligibility, and **{{label:email_message.leaseExpiresDate}}** marks the dispatcher’s claim. Use **Attempts** and the current status together when investigating. Avoid treating an expired claim as evidence that a recipient received or did not receive the email.
+- key: table:email_message;field:leaseExpiresDate
+  summary: 'When the dispatcher’s current claim on this message expires.'
+  content: |
+    These times explain why a queued message is not currently being sent. **{{label:email_message.sendAfter}}** records a requested delay, **{{label:email_message.nextAttemptDate}}** records retry eligibility, and **{{label:email_message.leaseExpiresDate}}** marks the dispatcher’s claim. Use **Attempts** and the current status together when investigating. Avoid treating an expired claim as evidence that a recipient received or did not receive the email.
+- key: table:email_message;field:lastError
+  summary: 'The latest error recorded while sending this message.'
+- key: table:email_message;field:finishedDate
+  summary: 'When the message reached its recorded terminal state.'
+- key: table:email_message;field:sentDate
+  summary: 'When the message was successfully handed to its provider.'
+- key: table:email_message;field:deliveredDate
+  summary: 'When delivery was recorded from the provider’s notification.'
+- key: table:email_message;field:bouncedDate
+  summary: 'When a bounce was recorded for this message.'
+- key: table:email_message;field:complainedDate
+  summary: 'When a recipient complaint was recorded for this message.'
+- key: table:email_message;field:deadLetterDate
+  summary: 'When the message was moved out of automatic retrying.'
+- key: table:email_message;field:linkedTableName
+  summary: 'The type of application record associated with this message.'
+- key: table:email_message;field:linkedRecordId
+  summary: 'The application record associated with this message.'
+- key: table:email_message;field:senderQbit
+  summary: 'The application component that requested this message.'
+- key: table:email_message;field:senderProcess
+  summary: 'The action that requested this message.'
+- key: table:email_message;field:suppressedAddresses
+  summary: 'Recipients omitted because a suppression applied.'
+- key: table:email_message;field:sendAfter
+  summary: 'The earliest requested time for sending this message.'
+  content: |
+    These times explain why a queued message is not currently being sent. **{{label:email_message.sendAfter}}** records a requested delay, **{{label:email_message.nextAttemptDate}}** records retry eligibility, and **{{label:email_message.leaseExpiresDate}}** marks the dispatcher’s claim. Use **Attempts** and the current status together when investigating. Avoid treating an expired claim as evidence that a recipient received or did not receive the email.
+- key: table:email_message_attempt;slot:help
+  summary: 'One attempt to hand an outgoing message to its delivery provider.'
+  content: |
+    **How rows get created:** The dispatcher records each attempt to send a message. An empty list means no attempts are currently retained.
+
+    Open **Attempts** from a message when you need to understand a retry or sending failure. Each row records the provider, attempt number, timing and outcome of one attempt. The worker and lease information help distinguish active work from an abandoned claim.
+
+    These records are written by the dispatcher and are not editable. Compare the error and outcome with the parent **Message**, which holds the overall delivery state and next retry time.
+- key: table:email_message_attempt;field:messageId
+  summary: 'The outgoing message this attempt belongs to.'
+- key: table:email_message_attempt;field:attemptNumber
+  summary: 'The sequence number of this sending attempt.'
+- key: table:email_message_attempt;field:outcome
+  summary: 'The result of this individual sending attempt.'
+  content: |
+    The possible outcomes are {{values:email_attempt_outcome}}. An attempt records the result of one handoff to a provider, while **Message** holds the overall state and retry timing. Review the error and the other attempts to distinguish a temporary problem from a repeated provider failure. Even a successful handoff can later receive a bounce event.
+- key: table:email_message_attempt;field:providerId
+  summary: 'The provider used for this attempt.'
+- key: table:email_message_attempt;field:claimedBy
+  summary: 'The dispatcher worker that claimed this attempt.'
+- key: table:email_message_attempt;field:startDate
+  summary: 'When this sending attempt started.'
+- key: table:email_message_attempt;field:endDate
+  summary: 'When this sending attempt ended.'
+- key: table:email_message_attempt;field:leaseExpiresDate
+  summary: 'When this worker’s claim on the attempt expires.'
+- key: table:email_message_attempt;field:durationMillis
+  summary: 'The elapsed time for this attempt in milliseconds.'
+- key: table:email_message_attempt;field:error
+  summary: 'The error recorded for this attempt.'
+- key: table:email_template;slot:help
+  summary: 'Reusable email content with versions, branding and approval information.'
+  content: |
+    **How rows get created:** Add a template with **New**, or use templates registered by your application. The built-in secure-message template is created on first use or when you open the Email home.
+
+    Use **Templates** for messages you send repeatedly with different recipient data. A template identifies its format, category and brand; its **Versions** hold the actual subject and content. **New Version** creates a draft you can edit without changing the currently active version.
+
+    Preview the draft with sample variables before choosing **Activate Version**. Approval for protected health information is separate from activation and is tied to a particular version. Template editing can require an additional permission.
+- key: table:email_template;field:name
+  summary: 'A unique name used to select this template.'
+- key: table:email_template;field:label
+  summary: 'The display name of the template.'
+- key: table:email_template;field:category
+  summary: 'The category applied to messages prepared from this template.'
+- key: table:email_template;field:kind
+  summary: 'The source format used to write this template’s versions.'
+- key: table:email_template;field:brandId
+  summary: 'The brand used to style this template.'
+- key: table:email_template;field:activeVersionId
+  summary: 'The version currently selected for normal sends.'
+- key: table:email_template;field:approvedVersionId
+  summary: 'The specific version approved for protected health information.'
+  content: |
+    Protected-health approval is recorded against a particular template version. Review the version’s content and variable declarations before using **Approve For PHI**. Creating or activating another version does not mean that every version is approved. Use the approved-version reference to check which content was reviewed, and check the delivery provider’s approval separately before sending sensitive data.
+- key: table:email_template;field:phiApproved
+  summary: 'Whether this template has recorded approval for protected health information.'
+  content: |
+    Protected-health approval is recorded against a particular template version. Review the version’s content and variable declarations before using **Approve For PHI**. Creating or activating another version does not mean that every version is approved. Use the approved-version reference to check which content was reviewed, and check the delivery provider’s approval separately before sending sensitive data.
+- key: table:email_template;field:phiApprovedBy
+  summary: 'Who approved this template for protected health information.'
+  content: |
+    Protected-health approval is recorded against a particular template version. Review the version’s content and variable declarations before using **Approve For PHI**. Creating or activating another version does not mean that every version is approved. Use the approved-version reference to check which content was reviewed, and check the delivery provider’s approval separately before sending sensitive data.
+- key: table:email_template;field:phiApprovedDate
+  summary: 'When approval for protected health information was recorded.'
+  content: |
+    Protected-health approval is recorded against a particular template version. Review the version’s content and variable declarations before using **Approve For PHI**. Creating or activating another version does not mean that every version is approved. Use the approved-version reference to check which content was reviewed, and check the delivery provider’s approval separately before sending sensitive data.
+- key: table:email_template;field:editPermissionName
+  summary: 'An additional permission required to edit this template.'
+- key: table:email_template;field:ownerQbit
+  summary: 'The application component responsible for this template.'
+- key: table:email_template;field:description
+  summary: 'Your description of when to use this template.'
+- key: table:email_template_version;slot:help
+  summary: 'A draft or published revision of a template’s subject, content and variables.'
+  content: |
+    **How rows get created:** Use **New Version** on a template to create a draft. Application-registered templates can also create their initial version.
+
+    Open a template’s **Versions** to edit a draft or inspect the content used by an earlier message. The **Preview** shows rendered content using sample variables. Provide the source in the format chosen on the parent **Template**, with optional plain-text content and a variable schema.
+
+    Only unapproved drafts can be edited. Use **Activate Version** to make reviewed content available for normal sends. Existing messages retain their saved content; activating a version does not rewrite them.
+- key: table:email_template_version;field:templateId
+  summary: 'The template this version belongs to.'
+- key: table:email_template_version;field:versionNumber
+  summary: 'The revision number within the template.'
+- key: table:email_template_version;field:status
+  summary: 'Whether this version is a draft, active or retired.'
+- key: table:email_template_version;field:locale
+  summary: 'The language or locale of this version.'
+- key: table:email_template_version;field:subject
+  summary: 'The subject template rendered with message variables.'
+- key: table:email_template_version;field:preheader
+  summary: 'The short preview text shown by supporting email clients.'
+- key: table:email_template_version;field:bodySource
+  summary: 'The editable source for the message’s main content.'
+  content: |
+    Write the main content in the format chosen on the parent **Template**. Edit a draft, then use **Preview** with sample variables to inspect the result. Generated HTML is recorded separately in **{{label:email_template_version.compiledHtml}}**. Activate the reviewed version when it is ready for normal sending; editing source does not change messages that have already been prepared.
+- key: table:email_template_version;field:textSource
+  summary: 'The editable source for the plain-text alternative.'
+- key: table:email_template_version;field:compiledHtml
+  summary: 'The generated HTML produced from the version’s source.'
+- key: table:email_template_version;field:variablesSchema
+  summary: 'The declared variables and their classifications for this version.'
+  content: |
+    Declare the variables expected by the version and provide representative example values for **Preview**. The schema also carries classifications used by protected-data checks. Use sample data that is appropriate for previewing and review the rendered subject and body before activation. The sample values are for checking the template; actual sends supply their own values and save a message snapshot.
+- key: table:email_template_version;field:sampleVariables
+  summary: 'Example variable values used to preview this version.'
+  content: |
+    Declare the variables expected by the version and provide representative example values for **Preview**. The schema also carries classifications used by protected-data checks. Use sample data that is appropriate for previewing and review the rendered subject and body before activation. The sample values are for checking the template; actual sends supply their own values and save a message snapshot.
+- key: table:email_template_version;field:createdBy
+  summary: 'Who created this template version.'
+- key: table:email_template_version;field:activatedDate
+  summary: 'When this version was activated.'
+- key: table:email_brand;slot:help
+  summary: 'Shared logos, colors and footer information for rendered email templates.'
+  content: |
+    **How rows get created:** Add a brand with **New**. If your host installs the optional defaults changelog, you can copy its neutral starter brand and customize it.
+
+    Use **Brands** to give related templates a consistent appearance. Set the logos, light and dark colors, site address and footer information that your messages need. Associate the brand with a **Template** to use it when rendering email.
+
+    Check the template **Preview** after changing branding, including the dark appearance and text contrast. Branding supplies presentation and footer data; it does not configure the email provider or verify a sender address.
+- key: table:email_brand;field:name
+  summary: 'A unique name used to select this brand.'
+- key: table:email_brand;field:label
+  summary: 'The display name of this brand.'
+- key: table:email_brand;field:logoUrl
+  summary: 'The logo image address used in the standard appearance.'
+- key: table:email_brand;field:logoDarkUrl
+  summary: 'The logo image address used in the dark appearance.'
+- key: table:email_brand;field:logoAlt
+  summary: 'The text alternative describing the logo.'
+- key: table:email_brand;field:primaryColor
+  summary: 'The main accent color used in branded email.'
+- key: table:email_brand;field:textColor
+  summary: 'The text color used in the standard appearance.'
+- key: table:email_brand;field:backgroundColor
+  summary: 'The background color used in the standard appearance.'
+- key: table:email_brand;field:darkBackgroundColor
+  summary: 'The background color used in the dark appearance.'
+- key: table:email_brand;field:darkPrimaryColor
+  summary: 'The accent color used in the dark appearance.'
+- key: table:email_brand;field:darkButtonTextColor
+  summary: 'The button text color used in the dark appearance.'
+- key: table:email_brand;field:darkTextColor
+  summary: 'The text color used in the dark appearance.'
+- key: table:email_brand;field:buttonTextColor
+  summary: 'The button text color used in the standard appearance.'
+- key: table:email_brand;field:footerMarkdown
+  summary: 'The shared email footer written in Markdown.'
+- key: table:email_brand;field:postalAddress
+  summary: 'The postal address available to the branded footer.'
+- key: table:email_brand;field:socialLinks
+  summary: 'The social links supplied to branded email rendering.'
+- key: table:email_brand;field:siteUrl
+  summary: 'The website address associated with this brand.'
+- key: table:email_brand;field:isDefault
+  summary: 'Whether this brand is marked as the default.'
+- key: table:email_brand;field:appName
+  summary: 'The application name displayed in branded email.'
+- key: table:email_suppression;slot:help
+  summary: 'An address blocked from some or all email because of a delivery or preference event.'
+  content: |
+    **How rows get created:** Provider bounces, complaints and unsubscribe requests can create restrictions automatically. You can also add a manual block with **New**.
+
+    Check **Suppressions** when a recipient is omitted from a send. Each entry identifies an address, the scope of the restriction and its reason, such as a bounce, complaint or unsubscribe. The source message and event help explain why it was added.
+
+    Review the reason before changing a suppression. Complaint entries require email administrator permission to change or remove. An expiry limits how long an entry applies; removing a restriction does not resend previously suppressed messages.
+- key: table:email_suppression;field:address
+  summary: 'The email address affected by this suppression.'
+- key: table:email_suppression;field:scope
+  summary: 'The categories of mail blocked for this address.'
+  content: |
+    Scope determines which categories of mail a suppression blocks. The configured choices are {{values:email_suppression_scope}}. Review the reason and source event before changing a restriction, especially for complaints and unsubscribe requests. A suppression can omit a recipient from a send without changing the template or provider. Removing it does not automatically resend previously omitted mail.
+- key: table:email_suppression;field:reason
+  summary: 'Why this address was suppressed.'
+- key: table:email_suppression;field:sourceMessageId
+  summary: 'The message that led to this suppression.'
+- key: table:email_suppression;field:sourceEventId
+  summary: 'The provider event that led to this suppression.'
+- key: table:email_suppression;field:note
+  summary: 'Notes explaining this suppression.'
+- key: table:email_suppression;field:createdDate
+  summary: 'When the suppression was created.'
+- key: table:email_suppression;field:expiresDate
+  summary: 'When this suppression stops applying, if an expiry was set.'
+- key: table:email_webhook_inbox;slot:help
+  summary: 'A provider notification received for later processing into email delivery events.'
+  content: |
+    **How rows get created:** Verified provider callbacks create inbox rows for background processing. Configure your provider's notification destination to receive delivery updates.
+
+    Use **Webhook Inbox** on a provider to investigate delivery notifications. A row keeps the received payload, its external identifier, processing state and any retry error. Processing can create **Events** and update the related **Message** or **Suppression**.
+
+    These rows are service-written. If processing failed, investigate the error before using **Reprocess**. The inbox tracks notification processing separately from sending attempts, so a failed inbox row does not necessarily mean the original email failed to send.
+- key: table:email_webhook_inbox;field:providerId
+  summary: 'The provider that sent this notification.'
+- key: table:email_webhook_inbox;field:kind
+  summary: 'The provider notification format recorded for this payload.'
+- key: table:email_webhook_inbox;field:externalEventId
+  summary: 'The provider’s event identifier used to recognize repeat notifications.'
+- key: table:email_webhook_inbox;field:nonce
+  summary: 'A notification reference used to detect replayed requests.'
+  content: |
+    The notification reference helps the receiver recognize replayed requests. It is recorded alongside the provider and external event identifier so repeated notifications can be handled safely. Use the inbox status, payload checksum and error when investigating duplicate or failed notifications. This value identifies notification processing; it is not a sender credential or proof of email delivery.
+- key: table:email_webhook_inbox;field:status
+  summary: 'The notification’s current processing state.'
+- key: table:email_webhook_inbox;field:attempts
+  summary: 'The number of processing attempts recorded for this notification.'
+- key: table:email_webhook_inbox;field:nextAttemptDate
+  summary: 'When this notification is next eligible for processing.'
+- key: table:email_webhook_inbox;field:lastError
+  summary: 'The latest error encountered while processing the notification.'
+- key: table:email_webhook_inbox;field:payloadJson
+  summary: 'The received notification content stored for processing.'
+- key: table:email_webhook_inbox;field:payloadSha256
+  summary: 'A checksum of the received notification content.'
+- key: table:email_webhook_inbox;field:receivedDate
+  summary: 'When the notification was received.'
+- key: table:email_webhook_inbox;field:processedDate
+  summary: 'When processing of the notification completed.'
+- key: table:email_event;slot:help
+  summary: 'A delivery, bounce, complaint or engagement event reported for an outgoing message.'
+  content: |
+    **How rows get created:** Notification processing records events reported by your provider. You do not enter them manually; an empty list can mean no callbacks have arrived.
+
+    Open **Events** from a message to see what its provider reported after sending. Events can record delivery, bounces, complaints and engagement, together with the recipient, occurrence time and available detail. Availability depends on the provider and tracking configuration.
+
+    Events are written by notification processing, not entered manually. Compare them with **Attempts** when diagnosing mail: attempts describe handing mail to a provider, while events describe what the provider reported afterward.
+- key: table:email_event;field:messageId
+  summary: 'The outgoing message this event describes.'
+- key: table:email_event;field:providerId
+  summary: 'The provider that reported this event.'
+- key: table:email_event;field:eventType
+  summary: 'The kind of delivery or engagement event reported.'
+- key: table:email_event;field:bounceType
+  summary: 'The provider’s classification of the bounce.'
+- key: table:email_event;field:recipient
+  summary: 'The recipient affected by this event.'
+- key: table:email_event;field:occurredDate
+  summary: 'When the event occurred according to the recorded notification.'
+- key: table:email_event;field:detail
+  summary: 'Additional information recorded for the event.'
+- key: table:email_event;field:url
+  summary: 'The link associated with this event, when reported.'
+- key: process:email_resend;slot:help
+  summary: 'Queue another message using an eligible message’s saved content.'
+  content: |
+    Use **Resend** after reviewing a failed or returned message and correcting its underlying problem. The action creates another send through the outbox using the saved message information; it does not rewrite the original delivery history. Review the selected messages first. Suppression, provider and content checks still apply, so resending is not a guarantee that mail will be accepted or delivered.
+- key: process:email_cancel;slot:help
+  summary: 'Cancel an eligible outgoing message before the dispatcher sends it.'
+  content: |
+    Use **Cancel** when a queued message should no longer be sent. Review the selected messages before continuing. The action checks their current state again and cancels only messages still eligible for cancellation. It cannot recall mail already handed to a provider. Check **Messages** and **Attempts** afterward if a selected message was skipped or had already been claimed.
+- key: process:email_send_now;slot:help
+  summary: 'Attempt to send an eligible queued message without waiting for normal dispatch.'
+  content: |
+    Use **Send Now** when you want the dispatcher to attempt an eligible message immediately. Review the selected messages before continuing. The send still goes through the outbox dispatcher and its provider, suppression and delivery controls. Open **Attempts** afterward to inspect the result. A successful handoff to a provider is separate from a later delivery notification.
+- key: process:email_send_test;slot:help
+  summary: 'Send a test email through the selected enabled provider.'
+  content: |
+    Use **Send Test Email** to check a provider’s configuration with a recipient you control. Enter **To address** and optionally select one of that provider’s sender addresses. The test is queued through the normal email service and then attempted immediately. Review the result and the resulting **Message** or **Attempts** if the provider refuses the send or delivery does not arrive.
+- key: process:email_send_templated;slot:help
+  summary: 'Prepare and queue an email using a template and supplied variables.'
+  content: |
+    Use **Send Email** when an application needs to send reusable template content. The service resolves the template version, variables, sender and delivery provider, then records the prepared message in **Messages**. Queuing and delivery are separate steps. Inspect the returned result and message state rather than assuming that accepting the request means the recipient has received the email.
+- key: process:email_send_ad_hoc;slot:help
+  summary: 'Prepare and queue an email from supplied subject and body content.'
+  content: |
+    Use **Send Ad Hoc Email** for content supplied directly instead of through a reusable template. The request still passes through the email service and durable outbox, including recipient, provider and suppression checks. Inspect the result in **Messages** and its **Attempts**. A queued result means the request was stored for sending, not that delivery has already succeeded.
+- key: process:email_new_version;slot:help
+  summary: 'Create a new editable draft version of the selected email template.'
+  content: |
+    Use **New Version** when you need to change a template without editing the active version. Review the selected template, then continue to create a draft. Open its **Versions** to edit the content and sample variables. Check **Preview** before using **Activate Version**. Creating a draft alone does not select it for normal outgoing messages or approve it for protected health information.
+- key: process:email_activate_version;slot:help
+  summary: 'Make a reviewed draft the active version of its email template.'
+  content: |
+    Use **Activate Version** after checking the draft’s subject, body and sample preview. Review the selected version before continuing. Activation changes the version used for subsequent template sends; it does not regenerate messages already in the outbox. Approval for protected health information is a separate decision. Open the parent **Template** afterward to check its active and approved version references.
+- key: process:email_approve_phi;slot:help
+  summary: 'Record approval of a template version for protected health information.'
+  content: |
+    Use **Approve For PHI** only after reviewing the selected version and its variable declarations for the intended protected health information. This is an email administrator action and records approval for a specific version. Approval does not make every provider suitable for sensitive delivery. Check the parent **Template** and the chosen **Provider** when investigating why a protected message was refused.
+- key: process:email_reprocess_webhook;slot:help
+  summary: 'Return a failed provider notification to the processing queue.'
+  content: |
+    Use **Reprocess** from **Webhook Inbox** after investigating a failed notification. Review the selected records and correct the cause before retrying. Eligible failed rows return to pending processing; the inbox processor later turns them into delivery events and related updates. This action retries notification handling, not the original email send. Check the inbox status and error after processing runs again.
+- key: process:email_process_webhooks;slot:help
+  summary: 'Process due provider notifications into email events and delivery updates.'
+  content: |
+    This background action processes notifications waiting in **Webhook Inbox**. Use its results when investigating why a provider’s notification has not appeared under a message’s **Events**. Processing can update delivery state and suppressions as appropriate. Failed notifications retain diagnostic and retry information. Review that information before using **Reprocess** on a failed inbox record.
+- key: process:email_dispatch;slot:help
+  summary: 'Attempt delivery of outgoing messages that are due for sending.'
+  content: |
+    The dispatcher claims eligible messages from the outbox and attempts delivery through their providers. Use **Messages** and **Attempts** to inspect what happened, including provider errors and scheduled retries. Dispatch honors the service’s delivery controls and records each attempt. A completed send attempt can still be followed by a delivery, bounce or complaint event reported by the provider.
+- key: process:email_maintain;slot:help
+  summary: 'Maintain the outgoing email queue and recover expired delivery claims.'
+  content: |
+    This background action performs the dispatcher’s queue maintenance. Use it when investigating messages whose worker claim expired or whose delivery state needs maintenance before another attempt. Review **Messages** and **Attempts** for the resulting state and error details. Maintenance is separate from processing provider notifications, which are handled through **Webhook Inbox**, and from clearing old retained message content.
+- key: process:email_retention;slot:help
+  summary: 'Clear expired email content and remove old delivery detail according to retention settings.'
+  content: |
+    Retention limits how long detailed email content remains stored. This action clears old bodies and saved variable values. Notification and marketing message records remain so their unsubscribe links keep working; other completed messages and their attempts and events can be deleted when message retention expires. Use **Messages** to inspect retained history. Missing old content can reflect retention rather than a sending failure.
+- key: widget:email_provider_children;slot:label
+  summary: 'Messages sent through this provider.'
+- key: widget:email_message_children;slot:label
+  summary: 'Sending attempts for this message.'
+- key: widget:email_template_children;slot:label
+  summary: 'Versions of this email template.'
+- key: widget:email_webhook_inbox_children;slot:label
+  summary: 'Notifications received from this provider.'
+- key: widget:email_provider_sender_address_children;slot:label
+  summary: 'Sender addresses configured for this provider.'
+- key: widget:email_event_children;slot:label
+  summary: 'Delivery and engagement events for this message.'
+- key: widget:emailHealth;slot:label
+  summary: 'Central Email health status, with a link to its checks in System Health.'
+- key: widget:emailHome;slot:label
+  summary: 'Email delivery totals, provider activity and recent messages visible to you.'
+- key: widget:emailTemplatePreview;slot:label
+  summary: 'A rendered preview of this email template version using sample variables.'
+- key: table:email_message;field:rfcMessageId
+  summary: The stable Message-ID used in the outgoing email headers.
+  content: |
+    Generated when the message is queued and reused on delivery attempts. This identifies the message independently of **{{label:email_message.providerMessageId}}**.
+- key: process:email_provider.bulkInsert;slot:help
+  summary: Import new records from a file after mapping columns and reviewing validation.
+  content: |
+    Use **{{label:email_provider.bulkInsert}}** on **{{label:email_provider}}**. Map your file columns to the fields you want to create, then review validation messages before continuing. Check the resulting records afterward. Email permissions and validation still apply.
+- key: process:email_provider.bulkEdit;slot:help
+  summary: Update selected records with shared field values after reviewing the selection.
+  content: |
+    Use **{{label:email_provider.bulkEdit}}** on **{{label:email_provider}}**. Choose the fields and values to apply to your selection, then review the proposed changes before continuing. Email permissions and validation still apply; review any skipped or rejected records.
+- key: process:email_provider.bulkEditWithFile;slot:help
+  summary: Update existing records by matching them to rows in a file.
+  content: |
+    Use **{{label:email_provider.bulkEditWithFile}}** on **{{label:email_provider}}**. Map your file columns and check how rows match existing records. Review the proposed updates before continuing and check the result for rejected rows. Email permissions and validation still apply.
+- key: process:email_provider.bulkDelete;slot:help
+  summary: Delete selected records after reviewing the selection and its dependencies.
+  content: |
+    Use **{{label:email_provider.bulkDelete}}** on **{{label:email_provider}}**. Review your selection carefully before continuing. Records still needed by other email records may be refused. Check the result for records that could not be removed. Deletion does not recall messages already sent.
+- key: process:email_provider_sender_address.bulkInsert;slot:help
+  summary: Import new records from a file after mapping columns and reviewing validation.
+  content: |
+    Use **{{label:email_provider_sender_address.bulkInsert}}** on **{{label:email_provider_sender_address}}**. Map your file columns to the fields you want to create, then review validation messages before continuing. Check the resulting records afterward. Email permissions and validation still apply.
+- key: process:email_provider_sender_address.bulkEdit;slot:help
+  summary: Update selected records with shared field values after reviewing the selection.
+  content: |
+    Use **{{label:email_provider_sender_address.bulkEdit}}** on **{{label:email_provider_sender_address}}**. Choose the fields and values to apply to your selection, then review the proposed changes before continuing. Email permissions and validation still apply; review any skipped or rejected records.
+- key: process:email_provider_sender_address.bulkEditWithFile;slot:help
+  summary: Update existing records by matching them to rows in a file.
+  content: |
+    Use **{{label:email_provider_sender_address.bulkEditWithFile}}** on **{{label:email_provider_sender_address}}**. Map your file columns and check how rows match existing records. Review the proposed updates before continuing and check the result for rejected rows. Email permissions and validation still apply.
+- key: process:email_provider_sender_address.bulkDelete;slot:help
+  summary: Delete selected records after reviewing the selection and its dependencies.
+  content: |
+    Use **{{label:email_provider_sender_address.bulkDelete}}** on **{{label:email_provider_sender_address}}**. Review your selection carefully before continuing. Records still needed by other email records may be refused. Check the result for records that could not be removed. Deletion does not recall messages already sent.
+- key: process:email_template.bulkInsert;slot:help
+  summary: Import new records from a file after mapping columns and reviewing validation.
+  content: |
+    Use **{{label:email_template.bulkInsert}}** on **{{label:email_template}}**. Map your file columns to the fields you want to create, then review validation messages before continuing. Check the resulting records afterward. Email permissions and validation still apply.
+- key: process:email_template.bulkEdit;slot:help
+  summary: Update selected records with shared field values after reviewing the selection.
+  content: |
+    Use **{{label:email_template.bulkEdit}}** on **{{label:email_template}}**. Choose the fields and values to apply to your selection, then review the proposed changes before continuing. Email permissions and validation still apply; review any skipped or rejected records.
+- key: process:email_template.bulkEditWithFile;slot:help
+  summary: Update existing records by matching them to rows in a file.
+  content: |
+    Use **{{label:email_template.bulkEditWithFile}}** on **{{label:email_template}}**. Map your file columns and check how rows match existing records. Review the proposed updates before continuing and check the result for rejected rows. Email permissions and validation still apply.
+- key: process:email_template.bulkDelete;slot:help
+  summary: Delete selected records after reviewing the selection and its dependencies.
+  content: |
+    Use **{{label:email_template.bulkDelete}}** on **{{label:email_template}}**. Review your selection carefully before continuing. Records still needed by other email records may be refused. Check the result for records that could not be removed. Deletion does not recall messages already sent.
+- key: process:email_template_version.bulkInsert;slot:help
+  summary: Import new records from a file after mapping columns and reviewing validation.
+  content: |
+    Use **{{label:email_template_version.bulkInsert}}** on **{{label:email_template_version}}**. Map your file columns to the fields you want to create, then review validation messages before continuing. Check the resulting records afterward. Email permissions and validation still apply.
+- key: process:email_template_version.bulkEdit;slot:help
+  summary: Update selected records with shared field values after reviewing the selection.
+  content: |
+    Use **{{label:email_template_version.bulkEdit}}** on **{{label:email_template_version}}**. Choose the fields and values to apply to your selection, then review the proposed changes before continuing. Email permissions and validation still apply; review any skipped or rejected records.
+- key: process:email_template_version.bulkEditWithFile;slot:help
+  summary: Update existing records by matching them to rows in a file.
+  content: |
+    Use **{{label:email_template_version.bulkEditWithFile}}** on **{{label:email_template_version}}**. Map your file columns and check how rows match existing records. Review the proposed updates before continuing and check the result for rejected rows. Email permissions and validation still apply.
+- key: process:email_template_version.bulkDelete;slot:help
+  summary: Delete selected records after reviewing the selection and its dependencies.
+  content: |
+    Use **{{label:email_template_version.bulkDelete}}** on **{{label:email_template_version}}**. Review your selection carefully before continuing. Records still needed by other email records may be refused. Check the result for records that could not be removed. Deletion does not recall messages already sent.
+- key: process:email_brand.bulkInsert;slot:help
+  summary: Import new records from a file after mapping columns and reviewing validation.
+  content: |
+    Use **{{label:email_brand.bulkInsert}}** on **{{label:email_brand}}**. Map your file columns to the fields you want to create, then review validation messages before continuing. Check the resulting records afterward. Email permissions and validation still apply.
+- key: process:email_brand.bulkEdit;slot:help
+  summary: Update selected records with shared field values after reviewing the selection.
+  content: |
+    Use **{{label:email_brand.bulkEdit}}** on **{{label:email_brand}}**. Choose the fields and values to apply to your selection, then review the proposed changes before continuing. Email permissions and validation still apply; review any skipped or rejected records.
+- key: process:email_brand.bulkEditWithFile;slot:help
+  summary: Update existing records by matching them to rows in a file.
+  content: |
+    Use **{{label:email_brand.bulkEditWithFile}}** on **{{label:email_brand}}**. Map your file columns and check how rows match existing records. Review the proposed updates before continuing and check the result for rejected rows. Email permissions and validation still apply.
+- key: process:email_brand.bulkDelete;slot:help
+  summary: Delete selected records after reviewing the selection and its dependencies.
+  content: |
+    Use **{{label:email_brand.bulkDelete}}** on **{{label:email_brand}}**. Review your selection carefully before continuing. Records still needed by other email records may be refused. Check the result for records that could not be removed. Deletion does not recall messages already sent.
+- key: process:email_suppression.bulkInsert;slot:help
+  summary: Import new records from a file after mapping columns and reviewing validation.
+  content: |
+    Use **{{label:email_suppression.bulkInsert}}** on **{{label:email_suppression}}**. Map your file columns to the fields you want to create, then review validation messages before continuing. Check the resulting records afterward. Email permissions and validation still apply.
+- key: process:email_suppression.bulkEdit;slot:help
+  summary: Update selected records with shared field values after reviewing the selection.
+  content: |
+    Use **{{label:email_suppression.bulkEdit}}** on **{{label:email_suppression}}**. Choose the fields and values to apply to your selection, then review the proposed changes before continuing. Email permissions and validation still apply; review any skipped or rejected records.
+- key: process:email_suppression.bulkEditWithFile;slot:help
+  summary: Update existing records by matching them to rows in a file.
+  content: |
+    Use **{{label:email_suppression.bulkEditWithFile}}** on **{{label:email_suppression}}**. Map your file columns and check how rows match existing records. Review the proposed updates before continuing and check the result for rejected rows. Email permissions and validation still apply.
+- key: process:email_suppression.bulkDelete;slot:help
+  summary: Delete selected records after reviewing the selection and its dependencies.
+  content: |
+    Use **{{label:email_suppression.bulkDelete}}** on **{{label:email_suppression}}**. Review your selection carefully before continuing. Records still needed by other email records may be refused. Check the result for records that could not be removed. Deletion does not recall messages already sent.
+- key: possibleValueSource:email_provider_kind;slot:help
+  summary: Delivery services and protocols available for provider configuration.
+  content: |
+    The available choices are {{values:email_provider_kind}}.
+- key: possibleValueSource:email_security;slot:help
+  summary: Connection security choices for SMTP providers.
+  content: |
+    The available choices are {{values:email_security}}.
+- key: possibleValueSource:email_health_status;slot:help
+  summary: Health states recorded for a delivery provider.
+  content: |
+    The available choices are {{values:email_health_status}}.
+- key: possibleValueSource:email_message_status;slot:help
+  summary: Delivery states recorded for outgoing messages.
+  content: |
+    The available choices are {{values:email_message_status}}.
+- key: possibleValueSource:email_attempt_outcome;slot:help
+  summary: Outcomes of individual sending attempts.
+  content: |
+    The available choices are {{values:email_attempt_outcome}}.
+- key: possibleValueSource:email_template_kind;slot:help
+  summary: Source formats available for template content.
+  content: |
+    The available choices are {{values:email_template_kind}}.
+- key: possibleValueSource:email_version_status;slot:help
+  summary: Lifecycle states of a template version.
+  content: |
+    The available choices are {{values:email_version_status}}.
+- key: possibleValueSource:email_suppression_scope;slot:help
+  summary: Categories of email that an address restriction can block.
+  content: |
+    The available choices are {{values:email_suppression_scope}}.
+- key: possibleValueSource:email_suppression_reason;slot:help
+  summary: Reasons an address can be blocked from receiving email.
+  content: |
+    The available choices are {{values:email_suppression_reason}}.
+- key: possibleValueSource:email_category;slot:help
+  summary: Message categories used for suppression and unsubscribe rules.
+  content: |
+    The available choices are {{values:email_category}}.
+- key: possibleValueSource:email_inbox_status;slot:help
+  summary: Processing states for received provider notifications.
+  content: |
+    The available choices are {{values:email_inbox_status}}.
+- key: possibleValueSource:email_event_type;slot:help
+  summary: Kinds of delivery and engagement events reported by providers.
+  content: |
+    The available choices are {{values:email_event_type}}.
+- key: possibleValueSource:email_bounce_type;slot:help
+  summary: Bounce classifications reported by providers.
+  content: |
+    The available choices are {{values:email_bounce_type}}.
+- key: possibleValueSource:email_brand;slot:help
+  summary: Select the branding for email content.
+- key: possibleValueSource:email_event;slot:help
+  summary: Select a delivery or engagement event.
+- key: possibleValueSource:email_message;slot:help
+  summary: Select an outgoing message.
+- key: possibleValueSource:email_message_attempt;slot:help
+  summary: Select a sending attempt.
+- key: possibleValueSource:email_provider;slot:help
+  summary: Select a delivery provider.
+- key: possibleValueSource:email_provider_sender_address;slot:help
+  summary: Select a sender address for a delivery provider.
+- key: possibleValueSource:email_suppression;slot:help
+  summary: Select an address restriction.
+- key: possibleValueSource:email_template;slot:help
+  summary: Select a reusable email template.
+- key: possibleValueSource:email_template_version;slot:help
+  summary: Select a version of an email template.
+- key: possibleValueSource:email_webhook_inbox;slot:help
+  summary: Select a received provider notification.

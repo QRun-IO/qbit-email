@@ -1,8 +1,8 @@
 # Durable job email effects
 
-This implements the email-side contract for QRun-IO/qqq#1191, spec section 2.13,
-without importing core jobs types. QQQ stays at released 4.1.0-RC.5. The
-`EmailJobEffectTarget implements EffectTarget` binding is deferred until RC.7 ships.
+QQQ 4.1.0-RC.7 supplies the durable jobs side-effects outbox. QBit Email registers
+`com.kingsrook.qbits.email.outbox.EmailJobEffectTarget` as target `email` to hand
+those effects to its own committed outbox. All provider sending remains asynchronous.
 
 ## Stored identity and schema upgrade
 
@@ -86,43 +86,100 @@ existing outbox row (including an audit row); it must never create another email
 merely because that row is terminal. Retain message rows and idempotency keys for
 at least the maximum effect retry/reconciliation horizon.
 
-## RC.7 binding design note (not compiled)
+## Register, declare and emit
 
-Mapping: `deliver -> QUEUED_OR_DUPLICATE => SENT(ref.id)`, `REFUSED => FAILED`;
-`reconcile -> getMessageByIdempotencyKey present => FOUND(ref.id), absent => NOT_FOUND`.
-Exceptions escape to core's retry/unknown handling. Payload decoding must preserve
-the existing PHI/variable policies and must not attach a caller transaction.
-
-This 25-line sketch is documentation-only. Match core names and signatures to the
-published RC.7 contract when it ships; `decode` represents payload conversion.
+Enable durable jobs **before** producing the email qbit, so the producer can register
+its target automatically:
 
 ```java
-// Future RC.7 binding; no core jobs imports in the RC.5 implementation.
-final class EmailJobEffectTarget implements EffectTarget
-{
-   // SENT acknowledges the committed qbit outbox row.
-   @Override
-   public DeliveryResult deliver(Effect effect) throws Exception
-   {
-      EmailApiRequest request = decode(effect.payload());
-      EmailApiEffectResult result = EmailApi.sendOnce(request, effect.idempotencyKey());
-      if(result.outcome() == EmailApiEffectOutcome.REFUSED)
-      {
-         return (DeliveryResult.failed("Email refused"));
-      }
-      return (DeliveryResult.sent(result.message().id().toString()));
-   }
-
-   // Existence reconciles handoff independently of mailbox delivery.
-   @Override
-   public ReconcileResult reconcile(Effect effect) throws Exception
-   {
-      return (EmailApi.getMessageByIdempotencyKey(effect.idempotencyKey())
-         .map(ref -> ReconcileResult.found(ref.id().toString()))
-         .orElseGet(ReconcileResult::notFound));
-   }
-}
+instance.withSupplementalMetaData(new DurableJobsMetaData());
+new DurableJobsMetaDataProvider().defineAll(instance, "rdbms", null);
+new EmailQBitProducer()
+   .withQBitConfig(new EmailQBitConfig().withBackendName("rdbms"))
+   .produce(instance);
 ```
+
+Apply core's jobs database schema as usual. `EmailJobEffectTarget.register(instance)`
+is a no-op without `DurableJobsMetaData`. If jobs are enabled after producing email,
+call this helper explicitly after enabling them.
+
+Declare the effect on the process's `DurableProcessMetaData` (retain any existing
+durable settings). Replace `<step>` with the process's real backend step name:
+
+```java
+process.withSupplementalMetaData(new DurableProcessMetaData()
+   .withEffect(new JobEffectDeclaration("welcomeEmail", "<step>", "email",
+      JobEffectType.IDEMPOTENT_EXTERNAL)));
+```
+
+Then emit from that step using its `RunBackendStepInput input` and a stable row key:
+
+```java
+Map<String, Serializable> payload = new LinkedHashMap<>();
+payload.put("to", "person@example.com");
+payload.put("subject", "Welcome");
+payload.put("textBody", "Your account is ready.");
+JobEffects.emit(input, "welcomeEmail", rowKey, payload);
+```
+
+The jobs classes above come from `com.kingsrook.qqq.backend.core.jobs` and its
+`effects` package; `Map`, `LinkedHashMap` and `Serializable` are JDK types.
+Core stores the effect with the chunk's progress and dispatches after commit.
+Outside a durable job, `JobEffects.emit` calls the target immediately with a fresh
+key, still only enqueueing email; a result other than SENT throws.
+
+Use **IDEMPOTENT_EXTERNAL**: qbit-email deduplicates by the effect's exact key,
+while its own delivery outbox reuses the stored Message-ID on provider attempts.
+This acknowledges one durable handoff, not exactly-once delivery to a mailbox.
+
+## Payload contract
+
+Unknown keys are ignored. Recognized values must have the following types:
+
+| Keys | Values |
+|---|---|
+| `to`, `cc`, `bcc` | A String mailbox or a list of String mailboxes; omitted means empty. Comma-separated strings are not split. |
+| `subject`, `templateName` | Strings; ordinary template/ad-hoc validation applies. |
+| `markdownBody`, `htmlBody`, `textBody` | String body alternatives. |
+| `variables` | Map with String keys and serializable values; requires a template schema and retains the normal PHI/classification checks. |
+| `category` | String enum name: `TRANSACTIONAL`, `SECURITY`, `NOTIFICATION`, or `MARKETING`. |
+| `providerName`, `brandName`, `locale` | Strings; omitted locale retains `en`. |
+| `from`, `replyTo` | String mailboxes, subject to ordinary sender validation. |
+| `fromAddressId` | Integer identifying an enabled address for the selected provider. |
+| `sendAfter` | ISO-8601 Instant String, for example `2026-10-14T12:00:00Z`. |
+| `linkedTableName`, `linkedRecordId` | String table name; record id converted to String. |
+
+The target always sets `senderQbit = "jobs"`, `senderProcess = effectName`, and
+uses `EffectRequest.idempotencyKey()`. Payload keys cannot override these or attach
+a transaction. `recordVariables`, `securityValues` and `payloadRef` are not decoded;
+provide the supported values directly in `payload`.
+
+## Identity and outcomes
+
+The dispatcher invokes the target as the system user. When `jobId` is present, the
+target loads the job under core's system scope and builds its owner session through
+`JobSessions.forJob`. Sending runs inside `QContext.withTemporaryContext` using that
+owner session, with current permissions and the intersection of current and captured
+security keys. The original dispatcher context is restored even after an exception.
+Without a job id, sending retains the caller's session.
+
+- `QUEUED_OR_DUPLICATE` becomes `EffectResult.sent(outboxId)`; `providerRef` is the
+  String email row id, not the transport provider's reference.
+- `REFUSED` becomes `EffectResult.failed(reasons)`, including suppressed replays.
+- A missing job or an owner session rejected by authentication/permission validation
+  becomes FAILED with `The job's owner can no longer send it: ...`.
+- Other exceptions, including payload decoding and database failures, become UNKNOWN.
+  Error text omits raw exception details to avoid exposing payloads or database values.
+  Core may resend IDEMPOTENT_EXTERNAL effects using the same key.
+- Reconcile uses `EmailEffects.findByIdempotencyKey`: any existing row becomes FOUND
+  with its id, otherwise NOT_FOUND. Lookup failures propagate rather than falsely
+  reporting absence. Reconcile never creates mail or changes the owner session.
+
+The binding uses `EmailEffects` internally; other consuming qbits continue to use
+`EmailApi`. The H2 target tests install core jobs metadata with `defineAll`, create
+all columns of the `jobs_job` lookup table, and observe the owner through an insert
+customizer because email messages have no built-in created-by/user field. No
+production job-lookup test seam is needed.
 
 Tests use H2, the existing GreenMail SMTP sink, fake SES and HTTP request seams;
 no vendor endpoints are called. The PostgreSQL migration is supplied for host

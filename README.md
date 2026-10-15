@@ -13,7 +13,7 @@ qbit-object-storage is wired in.
 
 ## Install
 
-Requires Java 21, QQQ **4.1.0-RC.5**, and a transactional RDBMS with the supplied unique
+Requires Java 21, QQQ **4.1.0-RC.8**, and a transactional RDBMS with the supplied unique
 constraints. Apply [the PostgreSQL DDL](docs/ddl/email-postgres.sql) before producing the qbit. SQL timestamps store UTC values without a timezone, matching QQQ RC.5.
 The physical table names equal their metadata names; `backendName` selects the host's
 QQQ database backend, as it does in qbit-webhooks.
@@ -38,6 +38,30 @@ The scheduler must already exist. Without a scheduler, callers can enqueue and r
 `EmailDispatcher` or Send Now manually; automatic dispatch is not installed.
 Configuration is looked up from the current `QInstance` on every call, never cached
 in a static variable.
+
+## Starter defaults and setup
+
+Include order: the DDL first, then the starter defaults from the host's master changelog (the qbit itself never runs DDL):
+
+```yaml
+- include: { file: db/liquibase/qbit-email/email-defaults.changelog.sql }
+```
+
+They are insert-only, hold no secrets, skip a host without the tables, and never change how mail looks on deploy. They add one brand, `neutral` (white background, near-black text, blue buttons, light and dark schemes, every pair at least 4.5:1 contrast), and only when the host has no brand at all. It is not the default brand: copy it for your own, or tick Default Brand on it.
+
+Everything else starts empty on purpose, and each table's help says why: a **provider** is your own connection (a server and the NAMES of its secret variables), so nothing can be sent until you add one; messages, attempts, events, the webhook inbox and suppressions are runtime data; the secure-message template is created by the qbit on first use and when the Email home opens, and other qbits register theirs with `EmailApi.ensureTemplate`.
+
+Every table has help that says what it is for and **how its rows get created**, available through the host's help bundle sync. Email admins also get a **Setup** card first on the home: provider, sender addresses, brands, templates, marketing readiness, delivery tracking, suppression list and scheduler, each with its state and the next step. It uses the same provider and brand resolution as the sender and `EmailApi.readiness`.
+
+### In-app help
+
+The producer registers [help/qbit-email.yaml](src/main/resources/help/qbit-email.yaml) as a `QBIT` bundle using QQQ's help bundle API. Registration is metadata-only and works without a `helpContent` table; hosts with help enabled load and sync registered bundles through QQQ. The app entry follows `EmailQBitConfig.appName`.
+
+To override wording or add deployment-specific instructions, register a separate `layer: HOST` bundle with the same entry keys and roles using `HelpBundles.register(qInstance, "help/your-host.yaml")`. HOST entries take precedence over QBIT entries; UI edits remain protected by the core sync. Keep the bundle version aligned with the POM's artifact version when releasing.
+
+`EmailTablesGuardrailTest.everyTableHasEmptyStateHelp` runs `HelpBundleAssertions` against the produced instance to check owned objects, non-trivial fields, summaries and live references, with no exclusions. `EmailQBitProducerTest` checks registration without a help table and with a custom app name. Both run during `./mvnw verify`.
+
+A template's **Owner Qbit** (the qbit that registered it) is now used: messages sent from the template name that qbit as their sender unless the request names one.
 
 ## Tables and permissions
 
@@ -179,9 +203,8 @@ rollup, with a link to System Health's checks filtered to `email`. It no longer
 lists provider diagnostics. The host must install central health metadata and its
 schema; central reads use the viewer's health permissions.
 
-This unreleased integration requires the core health SPI currently installed as
-`4.1.0-SNAPSHOT`; the POM's RC.5 pin is unchanged. Verify offline with
-`./mvnw -o verify -Dqqq.snapshot.version=4.1.0-SNAPSHOT` (`mvnw.cmd` on Windows).
+This integration uses the core health API released in QQQ `4.1.0-RC.8`.
+Verify offline with `./mvnw -o verify` (`mvnw.cmd` on Windows).
 
 ## Sending from another qbit
 
@@ -614,23 +637,29 @@ PHI canary egress, encryption, preview widgets and home data.
 
 ## Durable jobs
 
-`EmailEffects.send(request, effectIdempotencyKey)` hands a message to the committed
-email outbox exactly once per key and returns an `EmailEffects.Result` containing
-`EmailEffectOutcome` and an `EmailMessageRef`. `QUEUED_OR_DUPLICATE` means the outbox
-accepted responsibility; `REFUSED` means a definite refusal, including suppression.
-Use `findByIdempotencyKey` or `findByRfcMessageId` to reconcile a handoff. These are
-trusted system reads returning only references. Database failures propagate.
-Requests must not carry a caller transaction; the effect dispatcher calls after its
-own chunk commit. Existing `EmailService` transaction support is unchanged.
+Built on QQQ **4.1.0-RC.8**. Enable `DurableJobsMetaData` and define the jobs tables
+**before** producing the email qbit: `EmailQBitProducer` automatically registers
+`EmailJobEffectTarget` under target name `email`. If jobs are enabled later, call
+`EmailJobEffectTarget.register(instance)` afterward. Registration is a no-op when
+jobs are disabled.
 
-Each new message stores a unique `rfcMessageId` once. SMTP (including the Gmail preset),
-Postmark, SendGrid and Mailgun carry it on every attempt. SES receives it in the raw
-request but replaces it downstream; every transport retains `X-QQQ-Email-Id`.
-Message-ID enables correlation and receiver deduplication where supported; it does
-not promise exactly-once inbox delivery.
+Declare `new JobEffectDeclaration("welcomeEmail", "<step>", "email",
+JobEffectType.IDEMPOTENT_EXTERNAL)` in the process's `DurableProcessMetaData`, then
+call `JobEffects.emit(input, "welcomeEmail", rowKey, payload)` in the backend step.
+The payload accepts recipients, template or ad-hoc bodies, variables, routing and
+record linkage; see the [complete payload contract and examples](docs/DURABLE-JOBS.md).
 
-See [the handoff contract, provider references, schema upgrade and RC.7 binding sketch](docs/DURABLE-JOBS.md).
-The build remains on released QQQ **4.1.0-RC.5**, without durable-jobs dependencies.
+The target deduplicates handoffs by the effect key. SENT means the email outbox has
+committed, while its dispatcher owns provider delivery and retries. Job effects
+send under the job owner's current session and captured security scope; an owner
+whose session cannot be established produces FAILED. Other exceptions produce
+UNKNOWN and can safely be retried using the same key. Reconcile finds the existing
+outbox row, including terminal audit rows.
+
+Each message retains its stored RFC Message-ID across provider attempts. SMTP,
+Postmark, SendGrid and Mailgun carry it; SES replaces it downstream. This supports
+correlation and receiver deduplication where available, without guaranteeing
+exactly-once inbox delivery. See the [schema upgrade and provider notes](docs/DURABLE-JOBS.md).
 
 ## License
 

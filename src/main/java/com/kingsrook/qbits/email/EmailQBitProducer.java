@@ -39,6 +39,7 @@ import com.kingsrook.qqq.backend.core.model.metadata.QInstance;
 import com.kingsrook.qqq.backend.core.model.metadata.code.QCodeReference;
 import com.kingsrook.qqq.backend.core.model.metadata.fields.QFieldType;
 import com.kingsrook.qqq.backend.core.model.metadata.fields.QVirtualFieldMetaData;
+import com.kingsrook.qqq.backend.core.model.metadata.help.bundles.HelpBundles;
 import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitMetaDataProducer;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.QFieldSectionAlternativeType;
@@ -198,7 +199,13 @@ public class EmailQBitProducer implements QBitMetaDataProducer<EmailQBitConfig>
       output.add(new EmailOutboxMessagingProviderMetaData().withName(qBitConfig.getBridgeProviderName()));
       output.addSelfToInstance(qInstance);
       EmailHealthChecks.register(qInstance);
+      // Registration is metadata-only; core's startup sync guards hosts without helpContent.
+      HelpBundles.register(qInstance, "help/qbit-email.yaml");
+      HelpBundles.of(qInstance).getBundles().stream().filter(bundle -> "qbit-email".equals(bundle.getId()))
+         .flatMap(bundle -> bundle.getEntries().stream()).filter(entry -> "app:email;slot:help".equals(entry.getKey()))
+         .forEach(entry -> entry.setKey("app:" + qBitConfig.getAppName() + ";slot:help"));
       registerWebhooks(qInstance);
+      com.kingsrook.qbits.email.outbox.EmailJobEffectTarget.register(qInstance);
       return (new MetaDataProducerMultiOutput());
    }
 
