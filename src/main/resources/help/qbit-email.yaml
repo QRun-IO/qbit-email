@@ -1,5 +1,5 @@
 bundle: qbit-email
-version: 0.1.0-SNAPSHOT
+version: ${project.version}
 layer: QBIT
 entries:
 - key: app:email;slot:help
