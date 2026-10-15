@@ -51,7 +51,15 @@ They are insert-only, hold no secrets, skip a host without the tables, and never
 
 Everything else starts empty on purpose, and each table's help says why: a **provider** is your own connection (a server and the NAMES of its secret variables), so nothing can be sent until you add one; messages, attempts, events, the webhook inbox and suppressions are runtime data; the secure-message template is created by the qbit on first use and when the Email home opens, and other qbits register theirs with `EmailApi.ensureTemplate`.
 
-Every table has help that says what it is for and **how its rows get created**, shown on the table screen and when it is empty (`help/qbit-email.yaml`). Email admins also get a **Setup** card first on the home: provider, sender addresses, brands, templates, marketing readiness, delivery tracking, suppression list and scheduler, each with its state and the next step. It uses the same provider and brand resolution as the sender and `EmailApi.readiness`.
+Every table has help that says what it is for and **how its rows get created**, available through the host's help bundle sync. Email admins also get a **Setup** card first on the home: provider, sender addresses, brands, templates, marketing readiness, delivery tracking, suppression list and scheduler, each with its state and the next step. It uses the same provider and brand resolution as the sender and `EmailApi.readiness`.
+
+### In-app help
+
+The producer registers [help/qbit-email.yaml](src/main/resources/help/qbit-email.yaml) as a `QBIT` bundle using QQQ's help bundle API. Registration is metadata-only and works without a `helpContent` table; hosts with help enabled load and sync registered bundles through QQQ. The app entry follows `EmailQBitConfig.appName`.
+
+To override wording or add deployment-specific instructions, register a separate `layer: HOST` bundle with the same entry keys and roles using `HelpBundles.register(qInstance, "help/your-host.yaml")`. HOST entries take precedence over QBIT entries; UI edits remain protected by the core sync. Keep the bundle version aligned with the POM's artifact version when releasing.
+
+`EmailTablesGuardrailTest.everyTableHasEmptyStateHelp` runs `HelpBundleAssertions` against the produced instance to check owned objects, non-trivial fields, summaries and live references, with no exclusions. `EmailQBitProducerTest` checks registration without a help table and with a custom app name. Both run during `./mvnw verify`.
 
 A template's **Owner Qbit** (the qbit that registered it) is now used: messages sent from the template name that qbit as their sender unless the request names one.
 
