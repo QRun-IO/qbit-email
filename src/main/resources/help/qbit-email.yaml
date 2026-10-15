@@ -530,6 +530,8 @@ entries:
   summary: 'Sender addresses configured for this provider.'
 - key: widget:email_event_children;slot:label
   summary: 'Delivery and engagement events for this message.'
+- key: widget:emailHealth;slot:label
+  summary: 'Central Email health status, with a link to its checks in System Health.'
 - key: widget:emailHome;slot:label
   summary: 'Email delivery totals, provider activity and recent messages visible to you.'
 - key: widget:emailTemplatePreview;slot:label

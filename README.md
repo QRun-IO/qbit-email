@@ -13,7 +13,7 @@ qbit-object-storage is wired in.
 
 ## Install
 
-Requires Java 21, QQQ **4.1.0-RC.7**, and a transactional RDBMS with the supplied unique
+Requires Java 21, QQQ **4.1.0-RC.8**, and a transactional RDBMS with the supplied unique
 constraints. Apply [the PostgreSQL DDL](docs/ddl/email-postgres.sql) before producing the qbit. SQL timestamps store UTC values without a timezone, matching QQQ RC.5.
 The physical table names equal their metadata names; `backendName` selects the host's
 QQQ database backend, as it does in qbit-webhooks.
@@ -180,6 +180,31 @@ timeouts, and no redirects. HTTP 429/5xx retry with optional Retry-After; accoun
 and credential failures pause the provider. Tracking is explicitly controlled by
 `trackOpens` / `trackClicks`, off by default. The producer registers the phase-(c)
 receiver idempotently when the provided Javalin middleware is present.
+
+## Health checks
+
+The producer registers these checks with QQQ central health monitoring:
+
+| Name | Kind | Interval |
+|---|---|---|
+| `email.provider.<id>` (each enabled provider) | DEPENDENCY | 300 seconds |
+| `email.readiness` | DEPENDENCY | 300 seconds |
+
+Both use component `email`, category `EMAIL`, and a 5-second timeout. Provider
+checks read passive delivery state only: HEALTHY maps to UP, UNHEALTHY to DOWN,
+and missing/disabled/unknown state to UNKNOWN. The transport SPI has no
+non-sending connectivity method; these checks never contact providers or send
+mail. Readiness reuses `EmailApi.readiness` for every `EmailApiCategory`; any
+unmet prerequisite is DEGRADED, with only enum names in `failedChecks`. Existing
+passive state and `email.provider.unhealthy` alerts remain in place.
+
+The Email home uses a standard status widget reading the central `health_component`
+rollup, with a link to System Health's checks filtered to `email`. It no longer
+lists provider diagnostics. The host must install central health metadata and its
+schema; central reads use the viewer's health permissions.
+
+This integration uses the core health API released in QQQ `4.1.0-RC.8`.
+Verify offline with `./mvnw -o verify` (`mvnw.cmd` on Windows).
 
 ## Sending from another qbit
 
@@ -458,8 +483,8 @@ return 404. The legacy token covers every To/Cc/Bcc recipient, so use one mailbo
 per opt-out message for individual preferences. Preferences UI remains deferred
 until core #1162 ships in an RC.
 
-The home uses viewer-scoped counts and queries, UTC hour/day charts, provider health
-(admins), and 20 recent messages with masked recipients. No sample data or sampled
+The home uses viewer-scoped counts and queries, UTC hour/day charts, a central
+health status line, and 20 recent messages with masked recipients. No sample data or sampled
 counts are used. Delivered/bounced/complained totals count recipient events and
 use their occurred dates; sent/dead-letter totals count messages.
 
@@ -612,7 +637,7 @@ PHI canary egress, encryption, preview widgets and home data.
 
 ## Durable jobs
 
-Built on QQQ **4.1.0-RC.7**. Enable `DurableJobsMetaData` and define the jobs tables
+Built on QQQ **4.1.0-RC.8**. Enable `DurableJobsMetaData` and define the jobs tables
 **before** producing the email qbit: `EmailQBitProducer` automatically registers
 `EmailJobEffectTarget` under target name `email`. If jobs are enabled later, call
 `EmailJobEffectTarget.register(instance)` afterward. Registration is a no-op when

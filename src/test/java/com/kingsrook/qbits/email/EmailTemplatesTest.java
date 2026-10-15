@@ -221,7 +221,7 @@ class EmailTemplatesTest
    @Test
    void previewAndHome() throws Exception
    {
-      assertThat(EmailHome.overview().getHtml()).contains("No messages yet", "Relay").doesNotContain("<style", "overflow:auto");
+      assertThat(EmailHome.overview().getHtml()).contains("No messages yet", "Setup", "Relay").doesNotContain("Provider health").doesNotContain("<style", "overflow:auto");
       assertThat(EmailHome.hourly().getSublabel()).contains("No completed attempts");
       assertThat(EmailHome.suppressions().getSublabel()).contains("No new suppressions");
       QRecord version = draft("preview", "HTML", "[]", "{}", "<html><body><p>Preview text</p><script>evil()</script><img src=x onerror=evil()></body></html>");
@@ -233,7 +233,7 @@ class EmailTemplatesTest
       EmailService.send(new EmailRequest().withTemplateName("preview").withTo("Person <person@example.com>"));
       assertThat(EmailHome.overview().getHtml()).contains("p***@example.com", "/app/email_message/");
       QContext.getQSession().setPermissions(Set.of("email.view"));
-      assertThat(EmailHome.overview().getHtml()).contains("needs email.admin");
+      assertThat(EmailHome.overview().getHtml()).doesNotContain("Provider health", "needs email.admin");
    }
 
    /*******************************************************************************
