@@ -42,8 +42,8 @@ public final class EmailHomeView
    private static final String WRAP = "min-width:0;max-width:100%;overflow-wrap:anywhere;word-break:break-word;box-sizing:border-box;";
    private static final String CARD = WRAP + "padding:16px;border:1px solid rgba(127,127,127,.3);border-radius:8px;";
    private static final String ROW = WRAP + "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,12rem),1fr));gap:6px 16px;padding:10px 0;border-top:1px solid rgba(127,127,127,.2);";
-   private static final String FAIL = "#d64545";
    private static final String OK = "#2e9e5b";
+   private static final String FAIL = "#d64545";
    private static final DateTimeFormatter WHEN = DateTimeFormatter.ofPattern("MMM d, HH:mm 'UTC'", Locale.ENGLISH).withZone(ZoneOffset.UTC);
 
 
@@ -60,9 +60,9 @@ public final class EmailHomeView
    /*******************************************************************************
     ** One ordered home with real, viewer-scoped data supplied by EmailHome.
     *******************************************************************************/
-   public static String render(List<Integer> totals, ChartData hourly, List<QRecord> providers, boolean admin, List<QRecord> messages, ChartData suppressions)
+   public static String render(List<Integer> totals, ChartData hourly, List<QRecord> messages, ChartData suppressions)
    {
-      return (render(totals, hourly, providers, admin, messages, suppressions, List.of()));
+      return (render(totals, hourly, messages, suppressions, List.of()));
    }
 
 
@@ -70,7 +70,7 @@ public final class EmailHomeView
    /*******************************************************************************
     ** The same home with the Setup card first (email admins), when there are items.
     *******************************************************************************/
-   public static String render(List<Integer> totals, ChartData hourly, List<QRecord> providers, boolean admin, List<QRecord> messages, ChartData suppressions, List<EmailSetupStatus.Item> setup)
+   public static String render(List<Integer> totals, ChartData hourly, List<QRecord> messages, ChartData suppressions, List<EmailSetupStatus.Item> setup)
    {
       StringBuilder html = new StringBuilder("<div style=\"" + WRAP + "display:flex;flex-direction:column;gap:16px;color:inherit;line-height:1.4\">");
       setup(html, setup);
@@ -85,7 +85,6 @@ public final class EmailHomeView
       }
       html.append("</div>");
       bars(html, "Sends per hour, last 24 hours", hourly);
-      providers(html, providers, admin);
       messages(html, messages);
       bars(html, "Suppressions added, last 30 days", suppressions);
       return (html.append("</div>").toString());
@@ -185,32 +184,6 @@ public final class EmailHomeView
             .append(dataset.getColor()).append("\"></span>").append(esc(dataset.getLabel())).append("</span>");
       }
       html.append("<span style=\"opacity:.75\">UTC</span></div></section>");
-   }
-
-
-
-   /*******************************************************************************
-    ** Provider health is admin-only; disabled providers never appear healthy.
-    *******************************************************************************/
-   private static void providers(StringBuilder html, List<QRecord> providers, boolean admin)
-   {
-      section(html, "Provider health");
-      if(!admin || providers.isEmpty())
-      {
-         html.append("<p style=\"margin:0;opacity:.75\">").append(admin ? "No providers configured." : "Provider health needs email.admin.").append("</p>");
-      }
-      for(QRecord provider : providers)
-      {
-         String status = Boolean.FALSE.equals(provider.getValueBoolean("enabled")) ? "Disabled"
-            : "HEALTHY".equals(provider.getValueString("healthStatus")) ? "Healthy" : "UNHEALTHY".equals(provider.getValueString("healthStatus")) ? "Unhealthy" : "Unknown";
-         String color = "Healthy".equals(status) ? OK : "Unhealthy".equals(status) ? FAIL : "#808080";
-         html.append("<div style=\"").append(ROW).append("\">")
-            .append(cell("Provider", "<strong>" + esc(value(provider, "label", value(provider, "name", "Provider"))) + "</strong><br><span style=\"color:" + color + "\">" + status + "</span>"))
-            .append(cell("Last success", esc(when(provider.getValueInstant("lastSuccessDate")))))
-            .append(cell("Last failure", esc(value(provider, "lastFailureMessage", "None"))))
-            .append(cell("Per-minute headroom", esc(value(provider, "headroom", "No limit")))).append("</div>");
-      }
-      html.append("</section>");
    }
 
 

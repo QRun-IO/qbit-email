@@ -13,7 +13,7 @@ qbit-object-storage is wired in.
 
 ## Install
 
-Requires Java 21, QQQ **4.1.0-RC.7**, and a transactional RDBMS with the supplied unique
+Requires Java 21, QQQ **4.1.0-RC.8**, and a transactional RDBMS with the supplied unique
 constraints. Apply [the PostgreSQL DDL](docs/ddl/email-postgres.sql) before producing the qbit. SQL timestamps store UTC values without a timezone, matching QQQ RC.5.
 The physical table names equal their metadata names; `backendName` selects the host's
 QQQ database backend, as it does in qbit-webhooks.
@@ -51,7 +51,15 @@ They are insert-only, hold no secrets, skip a host without the tables, and never
 
 Everything else starts empty on purpose, and each table's help says why: a **provider** is your own connection (a server and the NAMES of its secret variables), so nothing can be sent until you add one; messages, attempts, events, the webhook inbox and suppressions are runtime data; the secure-message template is created by the qbit on first use and when the Email home opens, and other qbits register theirs with `EmailApi.ensureTemplate`.
 
-Every table has help that says what it is for and **how its rows get created**, shown on the table screen and when it is empty (`help/qbit-email.yaml`). Email admins also get a **Setup** card first on the home: provider, sender addresses, brands, templates, marketing readiness, delivery tracking, suppression list and scheduler, each with its state and the next step. It uses the same provider and brand resolution as the sender and `EmailApi.readiness`.
+Every table has help that says what it is for and **how its rows get created**, available through the host's help bundle sync. Email admins also get a **Setup** card first on the home: provider, sender addresses, brands, templates, marketing readiness, delivery tracking, suppression list and scheduler, each with its state and the next step. It uses the same provider and brand resolution as the sender and `EmailApi.readiness`.
+
+### In-app help
+
+The producer registers [help/qbit-email.yaml](src/main/resources/help/qbit-email.yaml) as a `QBIT` bundle using QQQ's help bundle API. Registration is metadata-only and works without a `helpContent` table; hosts with help enabled load and sync registered bundles through QQQ. The app entry follows `EmailQBitConfig.appName`.
+
+To override wording or add deployment-specific instructions, register a separate `layer: HOST` bundle with the same entry keys and roles using `HelpBundles.register(qInstance, "help/your-host.yaml")`. HOST entries take precedence over QBIT entries; UI edits remain protected by the core sync. Keep the bundle version aligned with the POM's artifact version when releasing.
+
+`EmailTablesGuardrailTest.everyTableHasEmptyStateHelp` runs `HelpBundleAssertions` against the produced instance to check owned objects, non-trivial fields, summaries and live references, with no exclusions. `EmailQBitProducerTest` checks registration without a help table and with a custom app name. Both run during `./mvnw verify`.
 
 A template's **Owner Qbit** (the qbit that registered it) is now used: messages sent from the template name that qbit as their sender unless the request names one.
 
@@ -172,6 +180,31 @@ timeouts, and no redirects. HTTP 429/5xx retry with optional Retry-After; accoun
 and credential failures pause the provider. Tracking is explicitly controlled by
 `trackOpens` / `trackClicks`, off by default. The producer registers the phase-(c)
 receiver idempotently when the provided Javalin middleware is present.
+
+## Health checks
+
+The producer registers these checks with QQQ central health monitoring:
+
+| Name | Kind | Interval |
+|---|---|---|
+| `email.provider.<id>` (each enabled provider) | DEPENDENCY | 300 seconds |
+| `email.readiness` | DEPENDENCY | 300 seconds |
+
+Both use component `email`, category `EMAIL`, and a 5-second timeout. Provider
+checks read passive delivery state only: HEALTHY maps to UP, UNHEALTHY to DOWN,
+and missing/disabled/unknown state to UNKNOWN. The transport SPI has no
+non-sending connectivity method; these checks never contact providers or send
+mail. Readiness reuses `EmailApi.readiness` for every `EmailApiCategory`; any
+unmet prerequisite is DEGRADED, with only enum names in `failedChecks`. Existing
+passive state and `email.provider.unhealthy` alerts remain in place.
+
+The Email home uses a standard status widget reading the central `health_component`
+rollup, with a link to System Health's checks filtered to `email`. It no longer
+lists provider diagnostics. The host must install central health metadata and its
+schema; central reads use the viewer's health permissions.
+
+This integration uses the core health API released in QQQ `4.1.0-RC.8`.
+Verify offline with `./mvnw -o verify` (`mvnw.cmd` on Windows).
 
 ## Sending from another qbit
 
@@ -450,8 +483,8 @@ return 404. The legacy token covers every To/Cc/Bcc recipient, so use one mailbo
 per opt-out message for individual preferences. Preferences UI remains deferred
 until core #1162 ships in an RC.
 
-The home uses viewer-scoped counts and queries, UTC hour/day charts, provider health
-(admins), and 20 recent messages with masked recipients. No sample data or sampled
+The home uses viewer-scoped counts and queries, UTC hour/day charts, a central
+health status line, and 20 recent messages with masked recipients. No sample data or sampled
 counts are used. Delivered/bounced/complained totals count recipient events and
 use their occurred dates; sent/dead-letter totals count messages.
 
@@ -604,7 +637,7 @@ PHI canary egress, encryption, preview widgets and home data.
 
 ## Durable jobs
 
-Built on QQQ **4.1.0-RC.7**. Enable `DurableJobsMetaData` and define the jobs tables
+Built on QQQ **4.1.0-RC.8**. Enable `DurableJobsMetaData` and define the jobs tables
 **before** producing the email qbit: `EmailQBitProducer` automatically registers
 `EmailJobEffectTarget` under target name `email`. If jobs are enabled later, call
 `EmailJobEffectTarget.register(instance)` afterward. Registration is a no-op when

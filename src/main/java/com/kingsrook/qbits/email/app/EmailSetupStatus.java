@@ -101,7 +101,7 @@ public final class EmailSetupStatus
       }
       else if(active != null && "UNHEALTHY".equals(active.getValueString("healthStatus")))
       {
-         items.add(new Item("Provider", EmailTables.PROVIDER, State.TODO, "The default provider is failing: " + valueOr(active.getValueString("lastFailureMessage"), "see its last failure") + ".",
+         items.add(new Item("Provider", EmailTables.PROVIDER, State.TODO, "The default provider is failing. See System Health for its status.",
             "Check its settings and secret variables, then Send Test Email."));
       }
       else

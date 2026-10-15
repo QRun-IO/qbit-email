@@ -6,12 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Changed
-- Built on QQQ 4.1.0-RC.7 (default QQQ profile).
+- Built on QQQ 4.1.0-RC.8 (default QQQ profile).
 
 ### Added
+- Central `email.provider.<id>` and `email.readiness` health checks (DEPENDENCY, EMAIL, 300 seconds), using passive provider state and existing category readiness with deadline and secret-safety coverage. Standard Email health status widget links to central checks. Uses the QQQ 4.1.0-RC.8 health API.
 - Foreign keys between all ten tables in `docs/ddl/email-postgres.sql`, named `fk_<table>_<column>`. CASCADE: a provider's sender addresses and a message's attempts and events. RESTRICT: providers with messages, attempts, events or webhook inbox rows; a brand used by a template; a template with versions. SET NULL: a message's sender address, template, version and brand; a template's active and approved version (the template/version cycle); a suppression's source message and event, so suppressions survive message retention. Ten new indexes cover the unindexed key columns. `docs/ddl/email-foreign-keys-upgrade.sql` adds the keys to an existing database. It first records orphan rows in `qqq_fk_quarantine`: nullable references are set to NULL, and rows whose required parent is missing are deleted and kept as JSON. The script is idempotent. The provider delete check now also refuses providers with attempts, events or inbox rows. `ForeignKeyGuardrailTest` (PostgreSQL 17 via Testcontainers) fails when a join or table possible-value field between email tables has no foreign key.
 - Starter defaults changelog `db/liquibase/qbit-email/email-defaults.changelog.sql` (insert-only, guarded): one non-default, high-contrast `neutral` brand, only when no brand exists. Tested through real Liquibase on H2, including that it never changes rendering.
-- Help for the Email app and every `email_*` table (`help/qbit-email.yaml`, STAND-IN core#1198): what the table is for and how its rows get created, shown when it is empty.
+- Host-neutral in-app help bundle for the Email app, tables, fields, actions and widgets, registered through QQQ's help bundle API. Replaces the temporary inline loader, preserves record-creation explanations and supports HOST overrides. The coverage gate checks owned metadata, summaries and live references.
 - A Setup card first on the Email home (email admins), using the sender's own provider and brand resolution and `EmailApi.readiness`. Opening the home also creates the built-in secure-message template.
 - `EmailTablesGuardrailTest`: every table is used by runtime code, seeded or listed as starting empty with a reason, and has help.
 
@@ -50,3 +51,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - QBIT_EMAIL core messaging bridge, Review/Result actions, backend send process, dispatch/maintenance/retention schedules and host integration declarations.
 - H2 concurrency and transaction tests, GreenMail end-to-end tests, fake SES tests, metadata/permission checks and process-runner coverage.
 - Repository scaffold to the QRun qbit repository standard (Apache-2.0, CircleCI qqq-orb 0.6.8 with the `configure-package-install` pre-step, GA-only `publish_release`, the `release-rc` caller workflow).
+
+### Removed
+- The Email home's standalone Provider health listing, including per-provider failure messages, last-success details and rate-headroom queries. Passive delivery health and `email.provider.unhealthy` alerts are retained.
