@@ -28,11 +28,11 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
-import com.kingsrook.qbits.email.metadata.EmailHelp;
 import com.kingsrook.qbits.email.metadata.EmailTables;
 import com.kingsrook.qqq.backend.core.context.QContext;
 import com.kingsrook.qqq.backend.core.model.metadata.QInstance;
-import com.kingsrook.qqq.backend.core.model.metadata.help.QHelpContent;
+import com.kingsrook.qqq.backend.core.model.metadata.help.bundles.HelpBundles;
+import com.kingsrook.qqq.backend.core.testing.HelpBundleAssertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -128,16 +128,17 @@ class EmailTablesGuardrailTest
    void everyTableHasEmptyStateHelp() throws Exception
    {
       QInstance instance = H2Support.setup(config -> config.withSecretResolver(name -> null));
-      assertThat(EmailHelp.entries()).allSatisfy((key, entry) -> assertThat(entry.path("summary").asText().length()).as(key).isLessThanOrEqualTo(120));
+      HelpBundleAssertions.forInstance(instance).bundles("help/qbit-email.yaml")
+         .owning(target -> target.name().startsWith("email"))
+         .assertComplete();
+      var entries = HelpBundles.of(instance).resolveWinningEntries();
       for(String table : EmailTables.ALL)
       {
-         List<QHelpContent> help = instance.getTable(table).getHelpContent() == null ? null : instance.getTable(table).getHelpContent().get(EmailHelp.SLOT);
-         assertThat(help).as(table + " table help").isNotEmpty();
-         assertThat(help.get(0).getContent()).as(table + " help says how rows get created").contains("How rows get created");
+         var help = entries.get(new HelpBundles.EntryKey("table:" + table + ";slot:help", "ALL_SCREENS"));
+         assertThat(help).as(table + " table help").isNotNull();
+         assertThat(help.entry().getContent()).as(table + " help says how rows get created").contains("How rows get created");
       }
-      assertThat(instance.getApp("email").getHelpContent()).containsKey(EmailHelp.SLOT);
-      assertThat(EmailHelp.entries().keySet()).allMatch(key -> !key.startsWith("table:") || instance.getTable(key.substring(6, key.indexOf(';'))) != null,
-         "help names only real tables");
+      assertThat(entries).containsKey(new HelpBundles.EntryKey("app:email;slot:help", "ALL_SCREENS"));
    }
 
 

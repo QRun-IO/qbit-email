@@ -23,6 +23,7 @@ package com.kingsrook.qbits.email;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
 import com.kingsrook.qqq.backend.core.model.metadata.QBackendMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.QInstance;
+import com.kingsrook.qqq.backend.core.model.metadata.help.bundles.HelpBundles;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -49,6 +50,27 @@ class EmailQBitProducerTest
       assertThat(producer.getQBitConfig().getBackendName()).isEqualTo("memory");
       assertThat(producer.produce(instance)).isNotNull();
       assertThat(instance.getQBits()).isNotEmpty();
+      assertThat(instance.getTable("helpContent")).isNull();
+      assertThat(HelpBundles.of(instance).getBundles()).singleElement().satisfies(bundle ->
+      {
+         assertThat(bundle.getId()).isEqualTo("qbit-email");
+         assertThat(bundle.getVersion()).isEqualTo("0.1.0-SNAPSHOT");
+      });
+   }
+
+   /*******************************************************************************
+    ** The app help follows the configured app name even without a help table.
+    *******************************************************************************/
+   @Test
+   void registersHelpForCustomAppName() throws Exception
+   {
+      QInstance instance = new QInstance();
+      instance.addBackend(new QBackendMetaData().withName("memory"));
+      new EmailQBitProducer().withQBitConfig(new EmailQBitConfig().withBackendName("memory").withAppName("mail"))
+         .produce(instance);
+      assertThat(HelpBundles.of(instance).resolveWinningEntries())
+         .containsKey(new HelpBundles.EntryKey("app:mail;slot:help", "ALL_SCREENS"))
+         .doesNotContainKey(new HelpBundles.EntryKey("app:email;slot:help", "ALL_SCREENS"));
    }
 
    /*******************************************************************************
