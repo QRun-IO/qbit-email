@@ -17,6 +17,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - `EmailTablesGuardrailTest`: every table is used by runtime code, seeded or listed as starting empty with a reason, and has help.
 
 ### Fixed
+- The `email.readiness` health message now names each missing item in plain words and where to set it (for example "Brand postal address is not set (Email > Brand > open the default brand > Postal address)") and says transactional email is unaffected by marketing-only gaps. The `failedChecks` detail is unchanged; a new `howToFix` detail lists the same text.
 - Derive the qbit metadata version from the Maven artifact version so released artifacts report their release version.
 - `email_template.ownerQbit` was stored but never read, and the built-in template did not set it. The built-in now names `qbit-email`, the field is read-only with help, and messages sent from a template name its owner qbit as `senderQbit` unless the request names one.
 
