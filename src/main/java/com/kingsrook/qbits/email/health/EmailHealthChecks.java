@@ -102,7 +102,7 @@ public class EmailHealthChecks implements HealthCheckSupplier
    {
       return (new HealthCheckMetaData().withName(name).withLabel(name).withComponent("email")
          .withCategory(HealthCategory.EMAIL).withKind(HealthCheckKind.DEPENDENCY)
-         .withIntervalSeconds(300).withTimeoutMs(5000).withCheckInstance(input ->
+         .withIntervalSeconds(EmailHealthWidget.CHECK_INTERVAL_MINUTES * 60).withTimeoutMs(5000).withCheckInstance(input ->
          {
             try
             {

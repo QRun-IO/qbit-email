@@ -62,7 +62,7 @@ class EmailHealthWidgetTest
       var instance = H2Support.setup(config -> config.withSecretResolver(name -> null));
       assertThat(instance.getWidget("emailHealth").getType()).isEqualTo(WidgetType.STATISTICS.getType());
       var data = render();
-      assertThat(data.getCount()).isEqualTo("UNKNOWN");
+      assertThat(data.getCount()).isEqualTo("Not checked yet");
       assertThat(data.getCountContext()).contains("not configured");
       assertThat(data.getCountURL()).isNull();
    }
@@ -88,15 +88,18 @@ class EmailHealthWidgetTest
          assertThat(render().getCountURL()).isNull();
          QContext.getQSession().setPermissions(Set.of("email.view", "health.read"));
          instance.setEnforcePermissionsInCoreActions(true);
-         assertThat(render().getCount()).isEqualTo("UNKNOWN");
+         assertThat(render().getCount()).isEqualTo("Not checked yet");
+         assertThat(render().getCountContext()).contains("Checks run every 5 minutes");
          connection.createStatement().execute("INSERT INTO health_component VALUES (1, 'email', 'DOWN'), (2, 'other', 'UP')");
-         assertThat(render().getCount()).isEqualTo("DOWN");
+         assertThat(render().getCount()).isEqualTo("Down");
          String link = URLDecoder.decode(render().getCountURL(), StandardCharsets.UTF_8);
          assertThat(link).startsWith("/app/health_check?filter=").contains("component", "email");
          connection.createStatement().execute("UPDATE health_component SET status = 'UP' WHERE id = 1");
-         assertThat(render().getCount()).isEqualTo("UP");
+         assertThat(render().getCount()).isEqualTo("Healthy");
+         connection.createStatement().execute("UPDATE health_component SET status = 'DEGRADED' WHERE id = 1");
+         assertThat(render().getCount()).isEqualTo("Degraded");
          connection.createStatement().execute("UPDATE health_component SET status = 'S3NT1NEL-secret' WHERE id = 1");
-         assertThat(render().getCount()).isEqualTo("UNKNOWN");
+         assertThat(render().getCount()).isEqualTo("Not checked yet");
          assertThat(render().getCountContext()).doesNotContain("S3NT1NEL-secret");
       }
    }
