@@ -165,6 +165,8 @@ class EmailHealthChecksTest
       assertThat(outcome.getStatus()).isEqualTo(HealthStatus.DEGRADED);
       assertThat(outcome.getDetails().getValues().get("failedChecks").toString().split(","))
          .containsExactly("PUBLIC_BASE_URL", "BRAND_POSTAL_ADDRESS");
+      assertThat(outcome.getMessage()).contains("Brand postal address is not set").contains("Brand > open the default brand > Postal address").contains("transactional email is unaffected").hasSizeLessThanOrEqualTo(500);
+      assertThat(outcome.getDetails().getValues().get("howToFix").toString()).contains("Public base URL is not set").contains("Brand postal address is not set");
       configureMarketing();
       assertThat(run(readinessCheck()).getStatus()).isEqualTo(HealthStatus.UP);
       update("enabled", false);

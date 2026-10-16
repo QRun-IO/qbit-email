@@ -27,6 +27,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import com.kingsrook.qbits.email.EmailRuntime;
 import com.kingsrook.qbits.email.api.EmailApi;
 import com.kingsrook.qbits.email.api.EmailApiCategory;
 import com.kingsrook.qbits.email.api.EmailApiReadinessCheck;
@@ -134,8 +135,38 @@ public class EmailHealthChecks implements HealthCheckSupplier
          ready &= readiness.ready();
          failed.addAll(readiness.failedChecks());
       }
-      return ((ready ? HealthCheckOutcome.up("Email configuration ready") : HealthCheckOutcome.degraded("Email configuration incomplete"))
-         .withDetails(new HealthDetails().withValue("failedChecks", failed.stream().map(Enum::name).collect(Collectors.joining(",")))));
+      if(ready)
+      {
+         return (HealthCheckOutcome.up("Email configuration ready").withDetails(new HealthDetails().withValue("failedChecks", "")));
+      }
+      var config = EmailRuntime.config(input.getQInstance());
+      String app = config == null || config.getAppLabel() == null ? "Email" : config.getAppLabel();
+      List<String> fixes = failed.stream().map(check -> fix(check, app)).toList();
+      String message = "Email configuration incomplete: " + String.join(" ", fixes);
+      String details = String.join("\n", fixes);
+      return (HealthCheckOutcome.degraded(message.length() > 500 ? message.substring(0, 500) : message)
+         .withDetails(new HealthDetails().withValue("failedChecks", failed.stream().map(Enum::name).collect(Collectors.joining(",")))
+            .withValue("howToFix", details.length() > 4000 ? details.substring(0, 4000) : details)));
+   }
+
+
+
+   /*******************************************************************************
+    ** Plain-words statement of one missing prerequisite and where to set it.
+    *******************************************************************************/
+   private static String fix(EmailApiReadinessCheck check, String app)
+   {
+      return (switch(check)
+      {
+         case NOT_INSTALLED -> "The Email qbit is not installed.";
+         case PROVIDER_MISSING -> "No enabled default email provider (" + app + " > Provider: add one and tick Enabled and Is Default).";
+         case PROVIDER_INVALID -> "The default email provider settings are invalid (" + app + " > Provider: open the default provider and correct it).";
+         case PHI_PROVIDER -> "PHI email needs a PHI-enabled provider with open and click tracking off (" + app + " > Provider).";
+         case PUBLIC_BASE_URL -> "Public base URL is not set (the publicBaseUrl setting in the Email qbit config). Needed for marketing unsubscribe links; transactional email is unaffected.";
+         case UNSUBSCRIBE_KEY -> "The QQQ_EMAIL_UNSUBSCRIBE_KEY secret is not set (deployment environment variable). Needed for marketing unsubscribe links; transactional email is unaffected.";
+         case BRAND_POSTAL_ADDRESS -> "Brand postal address is not set (" + app + " > Brand > open the default brand > Postal address). Needed for marketing email footers; transactional email is unaffected.";
+         case BODY_KEY -> "The QQQ_EMAIL_BODY_KEY secret is not set (deployment environment variable). Needed for PHI email.";
+      });
    }
 
 
