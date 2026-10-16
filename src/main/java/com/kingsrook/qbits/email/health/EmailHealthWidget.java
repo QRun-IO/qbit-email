@@ -47,6 +47,31 @@ import com.kingsrook.qqq.backend.core.utils.JsonUtils;
  *******************************************************************************/
 public class EmailHealthWidget extends AbstractWidgetRenderer
 {
+   public static final String NOT_CHECKED = "Not checked yet";
+
+   //////////////////////////////////////////////////////////////////////////////
+   // the interval of the email health checks (EmailHealthChecks), in minutes   //
+   //////////////////////////////////////////////////////////////////////////////
+   static final int CHECK_INTERVAL_MINUTES = 5;
+
+
+
+   /*******************************************************************************
+    ** Human words for a health status; unknown means no check has reported yet.
+    *******************************************************************************/
+   static String wording(String status)
+   {
+      return (switch(status)
+      {
+         case "UP" -> "Healthy";
+         case "DEGRADED" -> "Degraded";
+         case "DOWN" -> "Down";
+         default -> NOT_CHECKED;
+      });
+   }
+
+
+
    /*******************************************************************************
     ** Read the persisted rollup as the viewer, preserving health permissions.
     *******************************************************************************/
@@ -72,8 +97,8 @@ public class EmailHealthWidget extends AbstractWidgetRenderer
             }
          }
       }
-      StatisticsData data = new StatisticsData().withCount(status).withCountFontSize("1rem")
-         .withCountContext(!installed ? "Email - health monitoring not configured" : readable ? "Email - System Health" : "Email - health access required");
+      String context = !installed ? "Email - health monitoring not configured" : readable ? "Email - System Health. Checks run every " + CHECK_INTERVAL_MINUTES + " minutes" : "Email - health access required";
+      StatisticsData data = new StatisticsData().withCount(wording(status)).withCountFontSize("1rem").withCountContext(context);
       if(readable)
       {
          data.withCountURL("/app/health_check?filter=" + URLEncoder.encode(JsonUtils.toJson(EmailStore.equal("component", "email")), StandardCharsets.UTF_8));
