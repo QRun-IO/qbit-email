@@ -202,7 +202,8 @@ public final class EmailEnums
    {
       MARKDOWN,
       MJML,
-      HTML;
+      HTML,
+      CRM_LEGACY;
 
       /*******************************************************************************
        ** Stable database value.

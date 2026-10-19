@@ -275,9 +275,9 @@ public final class EmailTemplateDefinition
       {
          reasons.add("Category is required");
       }
-      if(kind == null || !List.of("MARKDOWN", "MJML", "HTML").contains(kind))
+      if(kind == null || !List.of("MARKDOWN", "MJML", "HTML", "CRM_LEGACY").contains(kind))
       {
-         reasons.add("Kind must be MARKDOWN, MJML or HTML");
+         reasons.add("Kind must be MARKDOWN, MJML, HTML or CRM_LEGACY");
       }
       if(subject == null || subject.isBlank())
       {

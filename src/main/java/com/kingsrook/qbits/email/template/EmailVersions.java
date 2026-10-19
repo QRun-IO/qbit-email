@@ -59,7 +59,8 @@ public final class EmailVersions
       {
          return;
       }
-      if(!EmailPermissionChecker.has(approval ? EmailPermissions.ADMIN : EmailPermissions.MANAGE))
+      if(!EmailPermissionChecker.has(approval ? EmailPermissions.ADMIN : EmailPermissions.MANAGE)
+         && (approval || !EmailPermissionChecker.hasTemplatePermission(true)))
       {
          throw (new IllegalArgumentException(approval ? "PHI approval needs email.admin" : "Editing templates needs email.manage"));
       }
@@ -125,9 +126,9 @@ public final class EmailVersions
          QRecord template = lock(version.getValueInteger("templateId"), tx);
          requireEdit(template, true);
          version = requiredVersion(versionId, tx);
-         if("RETIRED".equals(version.getValueString("status")) || "MARKETING".equals(template.getValueString("category")))
+         if("CRM_LEGACY".equals(template.getValueString("kind")) || "RETIRED".equals(version.getValueString("status")) || "MARKETING".equals(template.getValueString("category")))
          {
-            throw (new IllegalArgumentException("Retired versions and MARKETING templates cannot be approved for PHI"));
+            throw (new IllegalArgumentException("Legacy CRM templates, retired versions and MARKETING templates cannot be approved for PHI"));
          }
          EmailStore.update(EmailTables.TEMPLATE, new QRecord().withValue("id", template.getValue("id"))
             .withValue("phiApproved", true).withValue("approvedVersionId", versionId).withValue("phiApprovedBy", actor())
@@ -176,6 +177,11 @@ public final class EmailVersions
    public static void validate(QRecord template, QRecord version) throws QException
    {
       requireEdit(template, false);
+      if("CRM_LEGACY".equals(template.getValueString("kind")))
+      {
+         CrmLegacyTemplateRenderer.render(template, version, java.util.Map.of(), null, null);
+         return;
+      }
       if("MJML".equals(template.getValueString("kind")))
       {
          CliMjmlCompiler.rejectIncludes(version.getValueString("bodySource"));
