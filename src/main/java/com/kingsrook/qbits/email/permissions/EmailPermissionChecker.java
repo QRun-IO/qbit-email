@@ -21,6 +21,7 @@
 package com.kingsrook.qbits.email.permissions;
 
 
+import com.kingsrook.qbits.email.EmailRuntime;
 import com.kingsrook.qbits.email.metadata.EmailTables;
 import com.kingsrook.qbits.email.processes.EmailProcesses;
 import com.kingsrook.qqq.backend.core.actions.permissions.CustomPermissionChecker;
@@ -30,6 +31,7 @@ import com.kingsrook.qqq.backend.core.model.actions.AbstractActionInput;
 import com.kingsrook.qqq.backend.core.model.actions.tables.delete.DeleteInput;
 import com.kingsrook.qqq.backend.core.model.actions.tables.insert.InsertInput;
 import com.kingsrook.qqq.backend.core.model.actions.tables.update.UpdateInput;
+import com.kingsrook.qqq.backend.core.model.metadata.layout.QAppMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.permissions.MetaDataWithPermissionRules;
 import com.kingsrook.qqq.backend.core.model.metadata.processes.QProcessMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
@@ -58,13 +60,43 @@ public class EmailPermissionChecker implements CustomPermissionChecker
       {
          throw (new QPermissionDeniedException("Email messages and attempts are written only by the email qbit. Use Send Now, Resend or Cancel."));
       }
-      if(!has(needed))
+      if(!has(needed) && !hasTemplateGrant(actionInput, metaData))
       {
          throw (new QPermissionDeniedException("This needs the " + needed + " permission."));
       }
    }
 
 
+
+   /*******************************************************************************
+    ** Additional host permissions are restricted to template data and lifecycle.
+    *******************************************************************************/
+   private static boolean hasTemplateGrant(AbstractActionInput input, MetaDataWithPermissionRules metaData)
+   {
+      if(metaData instanceof QTableMetaData table
+         && (EmailTables.TEMPLATE.equals(table.getName()) || EmailTables.VERSION.equals(table.getName())))
+      {
+         return (hasTemplatePermission(input instanceof InsertInput || input instanceof UpdateInput || input instanceof DeleteInput));
+      }
+      if(metaData instanceof QAppMetaData app && EmailRuntime.config() != null && EmailRuntime.config().getAppName().equals(app.getName()))
+      {
+         return (hasTemplatePermission(false));
+      }
+      return (metaData instanceof QProcessMetaData process
+         && (EmailProcesses.NEW_VERSION.equals(process.getName()) || EmailProcesses.ACTIVATE_VERSION.equals(process.getName()))
+         && hasTemplatePermission(true));
+   }
+
+   /*******************************************************************************
+    ** Check only the configured read/write grant, without implying email.manage.
+    *******************************************************************************/
+   public static boolean hasTemplatePermission(boolean write)
+   {
+      var config = EmailRuntime.config();
+      String base = config == null ? null : config.getTemplatePermissionBaseName();
+      QSession session = QContext.getQSession();
+      return (base != null && !base.isBlank() && session != null && session.hasPermission(base + (write ? ".write" : ".read")));
+   }
 
    /*******************************************************************************
     ** The permission an action needs (null: nobody may do it directly).

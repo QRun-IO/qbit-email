@@ -32,9 +32,11 @@ import com.kingsrook.qbits.email.metadata.EmailTableCustomizers;
 import com.kingsrook.qbits.email.metadata.EmailTables;
 import com.kingsrook.qbits.email.outbox.EmailEffects;
 import com.kingsrook.qbits.email.outbox.EmailService;
+import com.kingsrook.qbits.email.permissions.EmailPermissionChecker;
 import com.kingsrook.qbits.email.support.EmailApiMapper;
 import com.kingsrook.qbits.email.support.EmailStore;
 import com.kingsrook.qbits.email.support.SystemWrites;
+import com.kingsrook.qbits.email.template.CrmLegacyTemplateRenderer;
 import com.kingsrook.qbits.email.template.EmailTemplateRenderer;
 import com.kingsrook.qbits.email.template.EmailTemplates;
 import com.kingsrook.qbits.email.template.VariableSchema;
@@ -119,6 +121,167 @@ public final class EmailApi
    }
 
 
+
+   /*******************************************************************************
+    ** Checked single-recipient template handoff for CRM history. Content is returned
+    ** only after the stored envelope matches the caller-authorized template/version.
+    ** Existing metadata-only APIs deliberately remain unchanged.
+    *******************************************************************************/
+   public static EmailApiTemplateEffectResult sendTemplateOnce(Integer templateId, EmailApiRequest request, String effectKey) throws QException
+   {
+      if(request == null || request.getTo().size() != 1 || !request.getCc().isEmpty() || !request.getBcc().isEmpty()
+         || request.getSenderQbit() == null || request.getSenderProcess() == null
+         || request.getLinkedTableName() == null || request.getLinkedRecordId() == null)
+      {
+         throw (new IllegalArgumentException("Checked template delivery requires one recipient, sender and linked record"));
+      }
+      List<String> recipients;
+      try
+      {
+         recipients = EmailService.addresses(request.getTo());
+      }
+      catch(Exception e)
+      {
+         throw (new IllegalArgumentException("Checked template delivery requires a valid recipient", e));
+      }
+      if(recipients.size() != 1)
+      {
+         throw (new IllegalArgumentException("Checked template delivery requires exactly one mailbox"));
+      }
+      request.withTo(recipients);
+      EmailApiRenderedTemplate selected = renderTemplate(templateId, request);
+      request.withTemplateName(selected.templateName());
+      EmailApiEffectResult effect = sendOnce(request, effectKey);
+      if(effect.outcome() == EmailApiEffectOutcome.REFUSED || effect.message() == null)
+      {
+         return (new EmailApiTemplateEffectResult(effect, null));
+      }
+      List<QRecord> rows = read(EmailTables.MESSAGE, EmailStore.equal("id", effect.message().id()).withLimit(1),
+         Set.of("templateId", "templateVersionId", "senderQbit", "senderProcess", "linkedTableName", "linkedRecordId", "category",
+            "toAddresses", "ccAddresses", "bccAddresses", "suppressedAddresses", "subject"));
+      if(rows.isEmpty())
+      {
+         throw (new QException("Checked template delivery is unavailable"));
+      }
+      QRecord row = rows.getFirst();
+      if(!java.util.Objects.equals(selected.templateId(), row.getValueInteger("templateId"))
+         || !java.util.Objects.equals(selected.versionId(), row.getValueInteger("templateVersionId"))
+         || !java.util.Objects.equals(request.getSenderQbit(), row.getValueString("senderQbit"))
+         || !java.util.Objects.equals(request.getSenderProcess(), row.getValueString("senderProcess"))
+         || !java.util.Objects.equals(request.getLinkedTableName(), row.getValueString("linkedTableName"))
+         || !java.util.Objects.equals(request.getLinkedRecordId(), row.getValueString("linkedRecordId"))
+         || !java.util.Objects.equals(request.getCategory().name(), row.getValueString("category"))
+         || !java.util.Objects.equals(request.getTo().getFirst(), row.getValueString("toAddresses"))
+         || !blank(row.getValueString("ccAddresses")) || !blank(row.getValueString("bccAddresses")) || !blank(row.getValueString("suppressedAddresses")))
+      {
+         throw (new QException("Checked template delivery envelope does not match"));
+      }
+      return (new EmailApiTemplateEffectResult(effect, row.getValueString("subject")));
+   }
+
+
+
+   /*******************************************************************************
+    ** Optional empty recipient columns are equivalent.
+    *******************************************************************************/
+   private static boolean blank(String value)
+   {
+      return (value == null || value.isBlank());
+   }
+
+
+
+   /*******************************************************************************
+    ** Render as the caller: template and version reads enforce table/record locks.
+    ** Native kinds retain their category and classification policy. No PHI export.
+    *******************************************************************************/
+   public static EmailApiRenderedTemplate renderTemplate(Integer templateId, EmailApiRequest request) throws QException
+   {
+      if(templateId == null || request == null || request.getCategory() == null)
+      {
+         throw (new IllegalArgumentException("Template and expected delivery category are required"));
+      }
+      QRecord template = visibleTemplateRecord(EmailTables.TEMPLATE, EmailStore.equal("id", templateId));
+      if(Boolean.TRUE.equals(template.getValueBoolean("phiApproved")))
+      {
+         throw (new IllegalArgumentException("PHI-approved templates require the protected template send path"));
+      }
+      QRecord version = visibleActiveVersion(templateId, request.getLocale());
+      QRecord rendered;
+      if("CRM_LEGACY".equals(template.getValueString("kind")))
+      {
+         if(request.getCategory() != EmailApiCategory.TRANSACTIONAL && request.getCategory() != EmailApiCategory.MARKETING)
+         {
+            throw (new IllegalArgumentException("Legacy CRM templates support only transactional or marketing delivery"));
+         }
+         rendered = CrmLegacyTemplateRenderer.render(template, version, request.getVariables(), request.getSubject(), request.getMarkdownBody());
+      }
+      else
+      {
+         if(!Set.of("MARKDOWN", "HTML", "MJML").contains(template.getValueString("kind")))
+         {
+            throw (new IllegalArgumentException("Unsupported template kind"));
+         }
+         if(request.getSubject() != null || request.getMarkdownBody() != null || request.getHtmlBody() != null || request.getTextBody() != null)
+         {
+            throw (new IllegalArgumentException("Native template content cannot be overridden"));
+         }
+         var renderer = new EmailTemplateRenderer(template, version, EmailApiMapper.request(request));
+         rendered = renderer.renderContent("render", "");
+      }
+      return (new EmailApiRenderedTemplate(templateId, version.getValueInteger("id"), template.getValueString("name"), template.getValueString("kind"), rendered.getValueString("subject"),
+         rendered.getValueString("markdownBody"), rendered.getValueString("htmlBody"), rendered.getValueString("textBody")));
+   }
+
+   /*******************************************************************************
+    ** Declare inputs without exposing content; CRM only computes values in use.
+    *******************************************************************************/
+   public static Set<String> templateVariableNames(Integer templateId) throws QException
+   {
+      QRecord template = visibleTemplateRecord(EmailTables.TEMPLATE, EmailStore.equal("id", templateId));
+      QRecord version = visibleActiveVersion(templateId, "en");
+      if("CRM_LEGACY".equals(template.getValueString("kind")))
+      {
+         String source = String.valueOf(version.getValue("subject")) + version.getValue("bodySource") + version.getValue("textSource");
+         return (Set.of("contact.firstName", "contact.lastName", "company.name", "owner.name", "unsubscribeUrl").stream()
+            .filter(name -> source.contains("{{" + name + "}}")).collect(java.util.stream.Collectors.toUnmodifiableSet()));
+      }
+      return (new VariableSchema(version.getValueString("variablesSchema")).entries().keySet());
+   }
+
+   /*******************************************************************************
+    ** Read only versions visible to the caller, preferring locale then English.
+    *******************************************************************************/
+   private static QRecord visibleActiveVersion(Integer templateId, String requestedLocale) throws QException
+   {
+      String locale = requestedLocale == null ? "en" : requestedLocale;
+      QueryInput versionQuery = new QueryInput(EmailTables.VERSION).withShouldFetchHeavyFields(true)
+         .withFilter(EmailStore.equal("templateId", templateId).withCriteria(new QFilterCriteria("status", QCriteriaOperator.EQUALS, "ACTIVE")));
+      new EmailPermissionChecker().checkPermissionsThrowing(versionQuery, QContext.getQInstance().getTable(EmailTables.VERSION));
+      List<QRecord> versions = new QueryAction().execute(versionQuery).getRecords();
+      QRecord version = versions.stream().filter(row -> locale.equals(row.getValueString("locale"))).findFirst()
+         .orElseGet(() -> versions.stream().filter(row -> "en".equals(row.getValueString("locale"))).findFirst().orElse(null));
+      if(version == null)
+      {
+         throw (new IllegalArgumentException("Template has no visible active version"));
+      }
+      return (version);
+   }
+
+   /*******************************************************************************
+    ** Ordinary query actions deliberately avoid the email system-write scope.
+    *******************************************************************************/
+   private static QRecord visibleTemplateRecord(String table, QQueryFilter filter) throws QException
+   {
+      QueryInput query = new QueryInput(table).withShouldFetchHeavyFields(true).withFilter(filter);
+      new EmailPermissionChecker().checkPermissionsThrowing(query, QContext.getQInstance().getTable(table));
+      List<QRecord> rows = new QueryAction().execute(query).getRecords();
+      if(rows.size() != 1)
+      {
+         throw (new IllegalArgumentException("Template is unavailable"));
+      }
+      return (rows.getFirst());
+   }
 
    /*******************************************************************************
     ** Create a validated template and active version once. Returns false when

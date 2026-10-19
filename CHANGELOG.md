@@ -5,6 +5,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- Shared-template APIs for permission- and record-lock-checked variable discovery, typed rendering, and idempotent sends with the exact stored subject and template/version provenance. Checked subject results bind replay to the same recipient, category, sender and linked record.
+- Optional host template read/write grants without granting provider, message, brand or PHI administration. Existing per-template edit permissions remain additional requirements.
+- `CRM_LEGACY` templates preserve migrated CRM token replacement, overrides and text-before-HTML behavior inside the email renderer. Native templates retain their existing category and content policies; migration and opt-in remain host responsibilities (see `UPGRADE.md`).
+
 ### Changed
 - Built on QQQ 4.1.0-RC.8 (default QQQ profile).
 
