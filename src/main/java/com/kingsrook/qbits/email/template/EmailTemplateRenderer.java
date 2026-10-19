@@ -57,6 +57,7 @@ import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
  *******************************************************************************/
 public final class EmailTemplateRenderer
 {
+   private final EmailRequest request;
    private final QRecord template;
    private final QRecord version;
    private final QRecord brand;
@@ -98,6 +99,7 @@ public final class EmailTemplateRenderer
     *******************************************************************************/
    public EmailTemplateRenderer(QRecord template, QRecord version, EmailRequest request) throws QException
    {
+      this.request = request;
       this.template = template;
       this.version = version;
       approved = Boolean.TRUE.equals(template.getValueBoolean("phiApproved")) && version.getValue("id") != null
@@ -117,6 +119,21 @@ public final class EmailTemplateRenderer
       EmailBrands.validate(brand);
       schema = new VariableSchema(version.getValueString("variablesSchema"));
       records = new LinkedHashMap<>(request.getRecordVariables());
+      if("CRM_LEGACY".equals(template.getValueString("kind")))
+      {
+         if(!records.isEmpty())
+         {
+            throw (new IllegalArgumentException("Legacy CRM variables must be supplied from caller-visible records"));
+         }
+         values = new LinkedHashMap<>(request.getVariables());
+         category = request.getCategory() == null ? EmailCategory.valueOf(template.getValueString("category")) : request.getCategory();
+         if(category != EmailCategory.TRANSACTIONAL && category != EmailCategory.MARKETING)
+         {
+            throw (new IllegalArgumentException("Legacy CRM templates support only transactional or marketing delivery"));
+         }
+         CrmLegacyTemplateRenderer.render(template, version, values, request.getSubject(), request.getMarkdownBody());
+         return;
+      }
       java.util.Set<String> references = new java.util.LinkedHashSet<>();
       for(String field : List.of("subject", "preheader", "bodySource", "textSource", "compiledHtml"))
       {
@@ -287,6 +304,40 @@ public final class EmailTemplateRenderer
     *******************************************************************************/
    public QRecord render(String messageId, String unsubscribe, boolean encrypt)
    {
+      return (render(messageId, unsubscribe, encrypt, true));
+   }
+
+   /*******************************************************************************
+    ** Render typed content for an existing transport, which adds its own layout.
+    *******************************************************************************/
+   public QRecord renderContent(String messageId, String unsubscribe)
+   {
+      return (render(messageId, unsubscribe, false, false));
+   }
+
+   /*******************************************************************************
+    ** Share parsing, classification and output limits across both consumers.
+    *******************************************************************************/
+   private QRecord render(String messageId, String unsubscribe, boolean encrypt, boolean decorate)
+   {
+      if("CRM_LEGACY".equals(template.getValueString("kind")))
+      {
+         QRecord rendered = CrmLegacyTemplateRenderer.render(template, version, values, request.getSubject(), request.getMarkdownBody());
+         String html = EmailMarkdown.render(rendered.getValueString("markdownBody"), brand);
+         if(decorate)
+         {
+            html = EmailLayout.render(html, null, brand, category, unsubscribe);
+         }
+         String text = HtmlToText.convert(html);
+         if((long) rendered.getValueString("subject").getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+            + html.getBytes(java.nio.charset.StandardCharsets.UTF_8).length + text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 1_048_576)
+         {
+            throw (new IllegalArgumentException("Template output is too large"));
+         }
+         return (rendered.withValue("htmlBody", html).withValue("textBody", text)
+            .withValue("variablesSnapshot", "{}").withValue("brandId", brand.getValue("id"))
+            .withValue("locale", version.getValue("locale")).withValue("category", category.name()).withValue("phiApproved", false));
+      }
       Map<String, Serializable> context = new LinkedHashMap<>(values);
       for(String field : List.of("label", "name", "siteUrl", "logoUrl", "logoDarkUrl", "logoAlt", "postalAddress", "primaryColor", "textColor", "backgroundColor", "darkBackgroundColor", "darkTextColor", "buttonTextColor", "darkPrimaryColor", "darkButtonTextColor", "footerMarkdown"))
       {
@@ -310,8 +361,12 @@ public final class EmailTemplateRenderer
       }
       String body = engine.parse(source, schema).render(context, "MARKDOWN".equals(kind) ? EmailTemplateEngine.Context.MARKDOWN : EmailTemplateEngine.Context.HTML, budget, warnings);
       String preheader = engine.parse(version.getValueString("preheader"), schema).render(context, EmailTemplateEngine.Context.TEXT, budget, warnings);
-      String html = "MARKDOWN".equals(kind) ? EmailLayout.render(EmailMarkdown.render(body, brand), preheader, brand, category, unsubscribe)
-         : EmailLayout.appendFooter(body, brand, category, unsubscribe);
+      String html = "MARKDOWN".equals(kind) ? EmailMarkdown.render(body, brand) : body;
+      if(decorate)
+      {
+         html = "MARKDOWN".equals(kind) ? EmailLayout.render(html, preheader, brand, category, unsubscribe)
+            : EmailLayout.appendFooter(html, brand, category, unsubscribe);
+      }
       if(approved)
       {
          html = restrictImages(html);

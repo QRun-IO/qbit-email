@@ -59,11 +59,29 @@ public class EmailQBitConfig implements QBitConfig
    private Integer leaseSeconds = 120;
    private Integer bodyRetentionDays = 30;
    private Integer messageRetentionDays = 0;
+   private String templatePermissionBaseName;
    private String appName = "email";
    private String appLabel = "Email";
    private List<QFieldMetaData> securityFields = List.of();
    private List<RecordSecurityLock> recordSecurityLocks = List.of();
    private MetaDataCustomizerInterface<QTableMetaData> tableMetaDataCustomizer;
+
+   /*******************************************************************************
+    ** Optional host permission base for template reads/writes only.
+    *******************************************************************************/
+   public String getTemplatePermissionBaseName()
+   {
+      return (templatePermissionBaseName);
+   }
+
+   /*******************************************************************************
+    ** Grant no provider, delivery, PHI approval or other email settings access.
+    *******************************************************************************/
+   public EmailQBitConfig withTemplatePermissionBaseName(String templatePermissionBaseName)
+   {
+      this.templatePermissionBaseName = templatePermissionBaseName;
+      return (this);
+   }
 
    public static final Pattern ENV_NAME = Pattern.compile("^[A-Z_][A-Z0-9_]{0,99}$");
 
